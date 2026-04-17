@@ -52,6 +52,7 @@ pub(crate) fn sniff_mime(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use crate::StashRepo;
+    use crate::config::StashConfig;
     use bytes::Bytes;
     use stash_types::{Identity, StashError, StashPath};
 
@@ -62,7 +63,7 @@ mod tests {
     #[tokio::test]
     async fn read_returns_latest_bytes_and_version() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
         let p = StashPath::parse("docs/x.md").unwrap();
         r.write(&p, Bytes::from("one"), &id(), None).await.unwrap();
         let v2 = r.write(&p, Bytes::from("two"), &id(), None).await.unwrap();
@@ -74,7 +75,7 @@ mod tests {
     #[tokio::test]
     async fn read_at_specific_commit_returns_historic_bytes() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
         let p = StashPath::parse("docs/x.md").unwrap();
         let v1 = r.write(&p, Bytes::from("one"), &id(), None).await.unwrap();
         r.write(&p, Bytes::from("two"), &id(), None).await.unwrap();
@@ -86,7 +87,7 @@ mod tests {
     #[tokio::test]
     async fn read_missing_returns_not_found() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
         let p = StashPath::parse("docs/missing.md").unwrap();
         let err = r.read(&p, None).await.unwrap_err();
         assert!(matches!(err, StashError::NotFound { .. }));

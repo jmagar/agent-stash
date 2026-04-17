@@ -1,6 +1,7 @@
 use crate::config::BlobConfig;
 use stash_types::StorageTier;
 
+#[derive(Debug)]
 pub struct TierRouter {
     config: BlobConfig,
 }

@@ -51,6 +51,7 @@ impl StashRepo {
 #[cfg(test)]
 mod tests {
     use crate::StashRepo;
+    use crate::config::StashConfig;
     use bytes::Bytes;
     use stash_types::{Identity, StashPath, StorageTier};
 
@@ -61,7 +62,7 @@ mod tests {
     #[tokio::test]
     async fn write_creates_commit_and_returns_version() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
         let p = StashPath::parse("docs/plan.md").unwrap();
         let v = r
             .write(&p, Bytes::from("hello"), &id(), Some("first".into()))
@@ -78,7 +79,7 @@ mod tests {
     #[tokio::test]
     async fn write_twice_produces_different_commits() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
         let p = StashPath::parse("a.md").unwrap();
         let v1 = r.write(&p, Bytes::from("one"), &id(), None).await.unwrap();
         let v2 = r.write(&p, Bytes::from("two"), &id(), None).await.unwrap();
@@ -89,7 +90,7 @@ mod tests {
     #[tokio::test]
     async fn write_default_message_is_generated() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
         let p = StashPath::parse("docs/x.md").unwrap();
         let v = r.write(&p, Bytes::from("hi"), &id(), None).await.unwrap();
         assert_eq!(v.message.as_deref(), Some("stash: write docs/x.md"));
@@ -99,7 +100,7 @@ mod tests {
     async fn write_serializes_under_mutex() {
         use std::sync::Arc;
         let td = tempfile::tempdir().unwrap();
-        let r = Arc::new(StashRepo::init(td.path()).await.unwrap());
+        let r = Arc::new(StashRepo::init(td.path(), StashConfig::default()).await.unwrap());
         let mut handles = vec![];
         for i in 0..10 {
             let r = Arc::clone(&r);

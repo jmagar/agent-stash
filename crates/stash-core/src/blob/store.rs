@@ -15,6 +15,14 @@ pub struct BlobStore {
     pub(crate) db: Db,
 }
 
+impl std::fmt::Debug for BlobStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlobStore")
+            .field("blobs_dir", &self.blobs_dir)
+            .finish_non_exhaustive()
+    }
+}
+
 impl BlobStore {
     pub fn new(root: &Path, db: Db) -> Self {
         Self {
