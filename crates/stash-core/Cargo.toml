@@ -25,4 +25,5 @@ tracing     = { workspace = true }
 tempfile       = { workspace = true }
 rstest         = { workspace = true }
 assert_matches = { workspace = true }
+serde_json     = { workspace = true }
 tokio          = { workspace = true, features = ["macros", "rt-multi-thread"] }
