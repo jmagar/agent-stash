@@ -41,6 +41,10 @@ impl StashRepo {
                     break;
                 }
                 let blob = repo.find_blob(git2::Oid::from_str(e.blob_sha.as_str()).unwrap())?;
+                // Skip blob-tier stubs — they are internal metadata, not user content.
+                if crate::blob::stub::is_blob_stub(blob.content()) {
+                    continue;
+                }
                 let content = match std::str::from_utf8(blob.content()) {
                     Ok(s) => s,
                     Err(_) => continue,
@@ -133,5 +137,22 @@ mod tests {
         seed(&r, &[("a.md", &body)]).await;
         let hits = r.search("x", None, 2).await.unwrap();
         assert_eq!(hits.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn search_skips_blob_tier_stubs() {
+        let td = tempfile::tempdir().unwrap();
+        let mut cfg = StashConfig::default();
+        cfg.blob.max_git_bytes = 5;
+        cfg.blob.blob_mime_prefixes = vec![];
+        cfg.blob.blob_path_globs = vec![];
+        let r = StashRepo::init(td.path(), cfg).await.unwrap();
+        let p = StashPath::parse("data/file.bin").unwrap();
+        r.write(&p, Bytes::from(b"ABCDEFGH" as &[u8]), &id(), None)
+            .await
+            .unwrap();
+        // "stash:blob" would match stub content if we don't skip
+        let hits = r.search("stash:blob", None, 10).await.unwrap();
+        assert!(hits.is_empty(), "blob stubs should not appear in search results");
     }
 }
