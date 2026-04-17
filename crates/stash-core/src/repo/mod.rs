@@ -3,6 +3,7 @@ use stash_types::{StashError, StashResult};
 use tokio::sync::Mutex;
 
 pub(crate) mod delete;
+pub(crate) mod diff;
 pub(crate) mod git;
 pub(crate) mod history;
 pub(crate) mod list;
