@@ -1,5 +1,5 @@
 use std::path::Path;
-use stash_types::{Identity, Sha, StashError, StashResult};
+use stash_types::{Identity, Sha, StashError, StashPath, StashResult};
 
 /// Run blocking git2 work off the async runtime. Panics are converted to
 /// `StashError::Internal` so tests still surface them cleanly.
@@ -85,4 +85,50 @@ fn insert_nested(
             Ok(())
         }
     }
+}
+
+pub(crate) struct ReadOutput {
+    pub blob_sha:   Sha,
+    pub commit_sha: Sha,
+    pub size:       u64,
+    pub author_name:  String,
+    #[allow(dead_code)] pub author_email: String,
+    pub timestamp:  chrono::DateTime<chrono::Utc>,
+    pub message:    Option<String>,
+    pub bytes:      Vec<u8>,
+}
+
+pub(crate) fn read_at(
+    repo_path: &Path,
+    path:      &StashPath,
+    at:        Option<&Sha>,
+) -> Result<Option<ReadOutput>, git2::Error> {
+    use chrono::TimeZone;
+    let repo = git2::Repository::open_bare(repo_path)?;
+
+    let commit = match at {
+        Some(sha) => repo.find_commit(git2::Oid::from_str(sha.as_str())?)?,
+        None      => match repo.head() {
+            Ok(h)  => h.peel_to_commit()?,
+            Err(_) => return Ok(None),     // empty repo
+        },
+    };
+    let tree = commit.tree()?;
+    let entry = match tree.get_path(std::path::Path::new(path.as_str())) {
+        Ok(e)  => e,
+        Err(e) if e.code() == git2::ErrorCode::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let blob = repo.find_blob(entry.id())?;
+    let author = commit.author();
+    Ok(Some(ReadOutput {
+        blob_sha:     Sha::parse(blob.id().to_string()).unwrap(),
+        commit_sha:   Sha::parse(commit.id().to_string()).unwrap(),
+        size:         blob.size() as u64,
+        author_name:  author.name().unwrap_or_default().to_string(),
+        author_email: author.email().unwrap_or_default().to_string(),
+        timestamp:    chrono::Utc.timestamp_opt(author.when().seconds(), 0).unwrap(),
+        message:      commit.message().map(|s| s.to_string()),
+        bytes:        blob.content().to_vec(),
+    }))
 }
