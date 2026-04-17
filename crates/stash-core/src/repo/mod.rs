@@ -2,6 +2,7 @@ use std::{path::{Path, PathBuf}, sync::Arc};
 use stash_types::{StashError, StashResult};
 use tokio::sync::Mutex;
 
+pub(crate) mod delete;
 pub(crate) mod git;
 pub(crate) mod read;
 pub(crate) mod write;

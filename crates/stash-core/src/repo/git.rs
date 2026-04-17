@@ -132,3 +132,72 @@ pub(crate) fn read_at(
         bytes:        blob.content().to_vec(),
     }))
 }
+
+pub(crate) fn delete_file(
+    repo_path: &Path,
+    path:      &str,
+    author:    &Identity,
+    message:   &str,
+) -> Result<Option<CommitOutput>, git2::Error> {
+    use chrono::TimeZone;
+    let repo = git2::Repository::open_bare(repo_path)?;
+
+    let parent_commit = match repo.head() {
+        Ok(h)  => h.peel_to_commit()?,
+        Err(_) => return Ok(None),
+    };
+    let parent_tree = parent_commit.tree()?;
+    // Fail fast if path not present.
+    if parent_tree.get_path(std::path::Path::new(path)).is_err() { return Ok(None); }
+
+    let new_tree = remove_nested(&repo, &parent_tree, path)?;
+
+    let (name, email) = author.git_author_line();
+    let now = chrono::Utc::now();
+    let sig_author    = git2::Signature::new(&name, &email,
+                           &git2::Time::new(now.timestamp(), 0))?;
+    let sig_committer = git2::Signature::new("agent-stash", "server@stash",
+                           &git2::Time::new(now.timestamp(), 0))?;
+
+    let tree = repo.find_tree(new_tree)?;
+    let commit_oid = repo.commit(
+        Some("refs/heads/main"),
+        &sig_author, &sig_committer,
+        message, &tree, &[&parent_commit],
+    )?;
+
+    Ok(Some(CommitOutput {
+        blob_sha:   Sha::parse("0".repeat(40)).unwrap(),  // tombstone marker
+        commit_sha: Sha::parse(commit_oid.to_string()).unwrap(),
+        timestamp:  chrono::Utc.timestamp_opt(now.timestamp(), 0).unwrap(),
+    }))
+}
+
+fn remove_nested(
+    repo: &git2::Repository,
+    tree: &git2::Tree<'_>,
+    path: &str,
+) -> Result<git2::Oid, git2::Error> {
+    match path.split_once('/') {
+        None => {
+            let mut builder = repo.treebuilder(Some(tree))?;
+            builder.remove(path)?;
+            builder.write()
+        }
+        Some((head, rest)) => {
+            let sub_entry = tree.get_name(head).ok_or_else(||
+                git2::Error::from_str(&format!("missing segment {head}")))?;
+            let sub_tree  = repo.find_tree(sub_entry.id())?;
+            let new_sub   = remove_nested(repo, &sub_tree, rest)?;
+            let mut builder = repo.treebuilder(Some(tree))?;
+            // If subtree became empty, remove instead of insert.
+            let new_sub_tree = repo.find_tree(new_sub)?;
+            if new_sub_tree.len() == 0 {
+                builder.remove(head)?;
+            } else {
+                builder.insert(head, new_sub, 0o040000)?;
+            }
+            builder.write()
+        }
+    }
+}
