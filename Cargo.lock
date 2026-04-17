@@ -895,6 +895,7 @@ dependencies = [
  "chrono",
  "git2",
  "glob",
+ "regex",
  "rstest",
  "serde",
  "stash-types",
