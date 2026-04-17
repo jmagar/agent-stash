@@ -921,9 +921,11 @@ dependencies = [
 name = "stash-types"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
  "bytes",
  "chrono",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 
