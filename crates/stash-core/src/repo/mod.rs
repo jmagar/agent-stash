@@ -3,6 +3,7 @@ use stash_types::{StashError, StashResult};
 use tokio::sync::Mutex;
 
 pub(crate) mod git;
+pub(crate) mod write;
 
 /// Git-backed file store. Single-writer (serialized via internal Mutex); reads are
 /// lock-free because committed git objects are immutable.
