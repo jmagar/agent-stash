@@ -32,3 +32,69 @@ impl TierRouter {
         StorageTier::Git
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::BlobConfig;
+    use stash_types::StorageTier;
+
+    fn router() -> TierRouter {
+        TierRouter::new(BlobConfig::default())
+    }
+
+    #[test]
+    fn small_text_routes_to_git() {
+        let r = router();
+        assert_eq!(r.decide("docs/plan.md", 500, "text/markdown"), StorageTier::Git);
+    }
+
+    #[test]
+    fn large_file_routes_to_blob() {
+        let r = router();
+        assert_eq!(
+            r.decide("logs/big.log", 2 * 1024 * 1024, "text/plain"),
+            StorageTier::Blob
+        );
+    }
+
+    #[test]
+    fn image_mime_routes_to_blob() {
+        let r = router();
+        assert_eq!(r.decide("photo.jpg", 100, "image/jpeg"), StorageTier::Blob);
+    }
+
+    #[test]
+    fn video_mime_routes_to_blob() {
+        let r = router();
+        assert_eq!(r.decide("clip.mp4", 1000, "video/mp4"), StorageTier::Blob);
+    }
+
+    #[test]
+    fn zip_glob_routes_to_blob() {
+        let r = router();
+        assert_eq!(
+            r.decide("archive.zip", 100, "application/octet-stream"),
+            StorageTier::Blob
+        );
+    }
+
+    #[test]
+    fn force_git_glob_overrides_mime() {
+        let mut cfg = BlobConfig::default();
+        cfg.force_git_globs = vec!["*.png".into()];
+        let r = TierRouter::new(cfg);
+        assert_eq!(r.decide("icon.png", 100, "image/png"), StorageTier::Git);
+    }
+
+    #[test]
+    fn force_git_glob_overrides_size() {
+        let mut cfg = BlobConfig::default();
+        cfg.force_git_globs = vec!["*.bin".into()];
+        let r = TierRouter::new(cfg);
+        assert_eq!(
+            r.decide("data.bin", 5 * 1024 * 1024, "application/octet-stream"),
+            StorageTier::Git
+        );
+    }
+}
