@@ -1,4 +1,8 @@
 use super::{git as git_helpers, StashRepo};
+use crate::blob::{
+    stub::{write_stub, BlobStub},
+    BlobRef,
+};
 use bytes::Bytes;
 use stash_types::{FileVersion, Identity, StashPath, StashResult, StorageTier};
 
@@ -12,6 +16,54 @@ impl StashRepo {
     ) -> StashResult<FileVersion> {
         let _g = self.write_lock.lock().await;
 
+        let mime = super::read::sniff_mime(path.as_str());
+        let size = bytes.len() as u64;
+        let tier = self.router.decide(path.as_str(), size, &mime);
+
+        if tier == StorageTier::Blob {
+            self.write_blob_tier(path, bytes, ident, msg, mime, size).await
+        } else {
+            self.write_git(path, bytes, ident, msg).await
+        }
+    }
+
+    async fn write_blob_tier(
+        &self,
+        path: &StashPath,
+        bytes: Bytes,
+        ident: &Identity,
+        msg: Option<String>,
+        mime: String,
+        size: u64,
+    ) -> StashResult<FileVersion> {
+        let blob_ref: BlobRef = self
+            .blob_store
+            .store(&bytes, &mime, path.as_str(), &ident.to_string())
+            .await?;
+
+        let stub_bytes = Bytes::from(write_stub(&BlobStub {
+            sha256: blob_ref.sha256.clone(),
+            size: blob_ref.size,
+            mime: mime.clone(),
+            original_name: path.as_str().to_string(),
+            uploaded_by: ident.to_string(),
+        }));
+
+        let mut git_ver = self.write_git(path, stub_bytes, ident, msg).await?;
+        git_ver.size = size;
+        git_ver.mime = mime;
+        git_ver.tier = StorageTier::Blob;
+        Ok(git_ver)
+    }
+
+    /// Write bytes directly into git. Caller MUST hold `write_lock`.
+    async fn write_git(
+        &self,
+        path: &StashPath,
+        bytes: Bytes,
+        ident: &Identity,
+        msg: Option<String>,
+    ) -> StashResult<FileVersion> {
         let path = path.clone();
         let ident = ident.clone();
         let message = msg.unwrap_or_else(|| format!("stash: write {}", path));
@@ -45,6 +97,19 @@ impl StashRepo {
             message: Some(message),
             tier: StorageTier::Git,
         })
+    }
+
+    /// Read raw bytes from the git tree (skips blob hydration). Used by delete.
+    pub(crate) async fn read_raw_git(
+        &self,
+        path: &StashPath,
+    ) -> StashResult<(stash_types::Sha, Bytes)> {
+        let repo_path = self.repo_path.clone();
+        let path_c = path.clone();
+        let out = git_helpers::blocking(move || git_helpers::read_at(&repo_path, &path_c, None))
+            .await?;
+        let out = out.ok_or(stash_types::StashError::NotFound { path: path.clone() })?;
+        Ok((out.blob_sha, Bytes::from(out.bytes)))
     }
 }
 
@@ -113,5 +178,51 @@ mod tests {
         for h in handles {
             h.await.unwrap().unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn write_small_text_stays_in_git_tier() {
+        let td = tempfile::tempdir().unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
+        let p = StashPath::parse("docs/plan.md").unwrap();
+        let v = r
+            .write(&p, Bytes::from("hello"), &id(), None)
+            .await
+            .unwrap();
+        assert_eq!(v.tier, StorageTier::Git);
+        assert!(!td.path().join("blobs").exists());
+    }
+
+    #[tokio::test]
+    async fn write_large_file_routes_to_blob_tier() {
+        let td = tempfile::tempdir().unwrap();
+        let mut cfg = StashConfig::default();
+        cfg.blob.max_git_bytes = 10;
+        cfg.blob.blob_mime_prefixes = vec![];
+        cfg.blob.blob_path_globs = vec![];
+        let r = StashRepo::init(td.path(), cfg).await.unwrap();
+        let p = StashPath::parse("data/big.bin").unwrap();
+        let big = Bytes::from(vec![0u8; 20]);
+        let v = r.write(&p, big.clone(), &id(), None).await.unwrap();
+        assert_eq!(v.tier, StorageTier::Blob);
+        assert_eq!(v.size, 20);
+        assert!(td.path().join("blobs").exists());
+    }
+
+    #[tokio::test]
+    async fn write_blob_tier_stub_is_in_git() {
+        use crate::blob::stub::is_blob_stub;
+        let td = tempfile::tempdir().unwrap();
+        let mut cfg = StashConfig::default();
+        cfg.blob.max_git_bytes = 5;
+        cfg.blob.blob_mime_prefixes = vec![];
+        cfg.blob.blob_path_globs = vec![];
+        let r = StashRepo::init(td.path(), cfg).await.unwrap();
+        let p = StashPath::parse("data/file.bin").unwrap();
+        r.write(&p, Bytes::from(b"123456789" as &[u8]), &id(), None)
+            .await
+            .unwrap();
+        let (_sha, raw) = r.read_raw_git(&p).await.unwrap();
+        assert!(is_blob_stub(&raw));
     }
 }
