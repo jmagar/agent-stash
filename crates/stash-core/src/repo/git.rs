@@ -247,3 +247,68 @@ pub(crate) fn list_tree(
     out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
 }
+
+pub(crate) struct HistoryEntry {
+    pub commit_sha:   Sha,
+    pub blob_sha:     Option<Sha>,       // None if the commit deleted the file
+    pub size:         u64,
+    pub author_name:  String,
+    #[allow(dead_code)] pub author_email: String,
+    pub timestamp:    chrono::DateTime<chrono::Utc>,
+    pub message:      Option<String>,
+}
+
+pub(crate) fn walk_history(
+    repo_path: &Path,
+    path:      &str,
+    skip:      usize,
+    limit:     usize,
+) -> Result<(Vec<HistoryEntry>, bool), git2::Error> {
+    use chrono::TimeZone;
+    let repo = git2::Repository::open_bare(repo_path)?;
+    let mut walker = repo.revwalk()?;
+    walker.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
+    match repo.head() {
+        Ok(h) => walker.push(h.target().unwrap())?,
+        Err(_) => return Ok((vec![], false)),
+    }
+
+    let mut out = vec![];
+    let mut seen = 0usize;
+    let mut has_more = false;
+    for oid in walker {
+        let oid = oid?;
+        let commit = repo.find_commit(oid)?;
+        let tree = commit.tree()?;
+        let entry = tree.get_path(std::path::Path::new(path));
+
+        // Compare against parent to know if this commit touched `path`.
+        let parent_entry = commit.parent(0).ok().and_then(|p| {
+            p.tree().ok().and_then(|t| t.get_path(std::path::Path::new(path)).ok()
+                .map(|e| e.id()))
+        });
+        let current_id = entry.as_ref().ok().map(|e| e.id());
+        let touched = current_id != parent_entry;
+        if !touched { continue; }
+
+        if seen < skip { seen += 1; continue; }
+        if out.len() >= limit { has_more = true; break; }
+
+        let (blob_sha, size) = match current_id {
+            Some(id) => (Some(Sha::parse(id.to_string()).unwrap()),
+                         repo.find_blob(id)?.size() as u64),
+            None => (None, 0),
+        };
+        let author = commit.author();
+        out.push(HistoryEntry {
+            commit_sha: Sha::parse(oid.to_string()).unwrap(),
+            blob_sha,
+            size,
+            author_name:  author.name().unwrap_or_default().to_string(),
+            author_email: author.email().unwrap_or_default().to_string(),
+            timestamp:    chrono::Utc.timestamp_opt(author.when().seconds(), 0).unwrap(),
+            message:      commit.message().map(|s| s.to_string()),
+        });
+    }
+    Ok((out, has_more))
+}

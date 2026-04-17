@@ -4,6 +4,7 @@ use tokio::sync::Mutex;
 
 pub(crate) mod delete;
 pub(crate) mod git;
+pub(crate) mod history;
 pub(crate) mod list;
 pub(crate) mod read;
 pub(crate) mod write;
