@@ -1,0 +1,10 @@
+[package]
+name         = "stash-client"
+version      = "0.1.0"
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+repository.workspace   = true
+
+[dependencies]
+stash-types = { path = "../stash-types" }
