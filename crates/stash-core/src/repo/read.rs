@@ -33,7 +33,7 @@ impl StashRepo {
     }
 }
 
-fn sniff_mime(path: &str) -> String {
+pub(crate) fn sniff_mime(path: &str) -> String {
     match path.rsplit_once('.').map(|(_, ext)| ext) {
         Some("md")                 => "text/markdown",
         Some("json")               => "application/json",

@@ -201,3 +201,49 @@ fn remove_nested(
         }
     }
 }
+
+pub(crate) struct ListEntry {
+    pub path:     String,
+    pub blob_sha: Sha,
+    pub size:     u64,
+}
+
+pub(crate) fn list_tree(
+    repo_path: &Path,
+    prefix:    &str,
+    at:        Option<&Sha>,
+) -> Result<Vec<ListEntry>, git2::Error> {
+    let repo = git2::Repository::open_bare(repo_path)?;
+    let commit = match at {
+        Some(sha) => repo.find_commit(git2::Oid::from_str(sha.as_str())?)?,
+        None      => match repo.head() {
+            Ok(h)  => h.peel_to_commit()?,
+            Err(_) => return Ok(vec![]),
+        },
+    };
+    let tree = commit.tree()?;
+
+    let mut out = vec![];
+    tree.walk(git2::TreeWalkMode::PreOrder, |dir, entry| {
+        if entry.kind() == Some(git2::ObjectType::Blob) {
+            let full = if dir.is_empty() {
+                entry.name().unwrap_or_default().to_string()
+            } else {
+                format!("{dir}{}", entry.name().unwrap_or_default())
+            };
+            if full.starts_with(prefix) {
+                if let Ok(blob) = repo.find_blob(entry.id()) {
+                    out.push(ListEntry {
+                        path:     full,
+                        blob_sha: Sha::parse(entry.id().to_string()).unwrap(),
+                        size:     blob.size() as u64,
+                    });
+                }
+            }
+        }
+        git2::TreeWalkResult::Ok
+    })?;
+    // Stable alpha order so pagination cursor is meaningful.
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(out)
+}

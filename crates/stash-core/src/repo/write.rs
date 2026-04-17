@@ -16,7 +16,7 @@ impl StashRepo {
         let ident    = ident.clone();
         let message  = msg.unwrap_or_else(|| format!("stash: write {}", path));
         let size     = bytes.len() as u64;
-        let mime     = sniff_mime(path.as_str(), &bytes);
+        let mime     = super::read::sniff_mime(path.as_str());
         let repo_path = self.repo_path.clone();
         let buf      = bytes.clone();
         let path_str = path.as_str().to_string();
@@ -46,17 +46,6 @@ impl StashRepo {
             tier:      StorageTier::Git,
         })
     }
-}
-
-fn sniff_mime(path: &str, _bytes: &[u8]) -> String {
-    match path.rsplit_once('.').map(|(_, ext)| ext) {
-        Some("md")                         => "text/markdown",
-        Some("json")                       => "application/json",
-        Some("toml")                       => "application/toml",
-        Some("yaml") | Some("yml")         => "application/yaml",
-        Some("txt") | Some("log")          => "text/plain",
-        _                                  => "application/octet-stream",
-    }.to_string()
 }
 
 #[cfg(test)]
