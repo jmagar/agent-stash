@@ -10,6 +10,21 @@ impl StashRepo {
     ) -> StashResult<FileVersion> {
         let _g = self.write_lock.lock().await;
 
+        // Read current git blob to detect blob-tier stub before tombstoning.
+        let (_, raw) = self.read_raw_git(path).await?;
+
+        let blob_sha: Option<String> = if crate::blob::stub::is_blob_stub(&raw) {
+            let stub = crate::blob::stub::parse_stub(&raw)?;
+            Some(stub.sha256)
+        } else {
+            None
+        };
+        let tier = if blob_sha.is_some() {
+            StorageTier::Blob
+        } else {
+            StorageTier::Git
+        };
+
         let path_c = path.clone();
         let ident_c = ident.clone();
         let message = msg.unwrap_or_else(|| format!("stash: delete {}", path));
@@ -25,6 +40,11 @@ impl StashRepo {
             path: path_c.clone(),
         })?;
 
+        // Release blob refcount after git commit succeeds.
+        if let Some(sha) = blob_sha {
+            self.blob_store.release(&sha).await?;
+        }
+
         Ok(FileVersion {
             path: path_c,
             sha: Sha::parse("0".repeat(40)).unwrap(),
@@ -34,7 +54,7 @@ impl StashRepo {
             author: ident.clone(),
             timestamp: out.timestamp,
             message: Some(message),
-            tier: StorageTier::Git,
+            tier,
         })
     }
 }
@@ -83,5 +103,24 @@ mod tests {
         r.delete(&p, &id(), None).await.unwrap();
         let (_, bytes) = r.read(&p, Some(v1.commit)).await.unwrap();
         assert_eq!(&bytes[..], b"orig");
+    }
+
+    #[tokio::test]
+    async fn delete_blob_tier_decrements_refcount() {
+        let td = tempfile::tempdir().unwrap();
+        let mut cfg = StashConfig::default();
+        cfg.blob.max_git_bytes = 5;
+        cfg.blob.blob_mime_prefixes = vec![];
+        cfg.blob.blob_path_globs = vec![];
+        let r = StashRepo::init(td.path(), cfg).await.unwrap();
+        let p = StashPath::parse("data/file.bin").unwrap();
+        r.write(&p, Bytes::from(b"ABCDEFGH" as &[u8]), &id(), None)
+            .await
+            .unwrap();
+        r.delete(&p, &id(), None).await.unwrap();
+        assert!(matches!(
+            r.read(&p, None).await.unwrap_err(),
+            stash_types::StashError::NotFound { .. }
+        ));
     }
 }
