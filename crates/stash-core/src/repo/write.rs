@@ -1,49 +1,49 @@
+use super::{git as git_helpers, StashRepo};
 use bytes::Bytes;
 use stash_types::{FileVersion, Identity, StashPath, StashResult, StorageTier};
-use super::{git as git_helpers, StashRepo};
 
 impl StashRepo {
     pub async fn write(
         &self,
-        path:  &StashPath,
+        path: &StashPath,
         bytes: Bytes,
         ident: &Identity,
-        msg:   Option<String>,
+        msg: Option<String>,
     ) -> StashResult<FileVersion> {
         let _g = self.write_lock.lock().await;
 
-        let path     = path.clone();
-        let ident    = ident.clone();
-        let message  = msg.unwrap_or_else(|| format!("stash: write {}", path));
-        let size     = bytes.len() as u64;
-        let mime     = super::read::sniff_mime(path.as_str());
+        let path = path.clone();
+        let ident = ident.clone();
+        let message = msg.unwrap_or_else(|| format!("stash: write {}", path));
+        let size = bytes.len() as u64;
+        let mime = super::read::sniff_mime(path.as_str());
         let repo_path = self.repo_path.clone();
-        let buf      = bytes.clone();
+        let buf = bytes.clone();
         let path_str = path.as_str().to_string();
-        let msg_c    = message.clone();
-        let ident_c  = ident.clone();
+        let msg_c = message.clone();
+        let ident_c = ident.clone();
 
         let out = git_helpers::blocking(move || {
             git_helpers::commit_file(git_helpers::CommitInput {
                 repo_path: &repo_path,
-                path:      &path_str,
-                blob:      &buf,
-                author:    &ident_c,
-                message:   &msg_c,
+                path: &path_str,
+                blob: &buf,
+                author: &ident_c,
+                message: &msg_c,
             })
         })
         .await?;
 
         Ok(FileVersion {
             path,
-            sha:       out.blob_sha,
-            commit:    out.commit_sha,
+            sha: out.blob_sha,
+            commit: out.commit_sha,
             size,
             mime,
-            author:    ident,
+            author: ident,
             timestamp: out.timestamp,
-            message:   Some(message),
-            tier:      StorageTier::Git,
+            message: Some(message),
+            tier: StorageTier::Git,
         })
     }
 }
@@ -54,15 +54,19 @@ mod tests {
     use bytes::Bytes;
     use stash_types::{Identity, StashPath, StorageTier};
 
-    fn id() -> Identity { Identity::new("claude", "tootie").unwrap() }
+    fn id() -> Identity {
+        Identity::new("claude", "tootie").unwrap()
+    }
 
     #[tokio::test]
     async fn write_creates_commit_and_returns_version() {
         let td = tempfile::tempdir().unwrap();
         let r = StashRepo::init(td.path()).await.unwrap();
         let p = StashPath::parse("docs/plan.md").unwrap();
-        let v = r.write(&p, Bytes::from("hello"), &id(), Some("first".into()))
-                 .await.unwrap();
+        let v = r
+            .write(&p, Bytes::from("hello"), &id(), Some("first".into()))
+            .await
+            .unwrap();
         assert_eq!(v.path, p);
         assert_eq!(v.size, 5);
         assert_eq!(v.tier, StorageTier::Git);
@@ -79,7 +83,7 @@ mod tests {
         let v1 = r.write(&p, Bytes::from("one"), &id(), None).await.unwrap();
         let v2 = r.write(&p, Bytes::from("two"), &id(), None).await.unwrap();
         assert_ne!(v1.commit, v2.commit);
-        assert_ne!(v1.sha,    v2.sha);
+        assert_ne!(v1.sha, v2.sha);
     }
 
     #[tokio::test]
@@ -105,6 +109,8 @@ mod tests {
                 r.write(&p, Bytes::from(format!("{i}")), &ident, None).await
             }));
         }
-        for h in handles { h.await.unwrap().unwrap(); }
+        for h in handles {
+            h.await.unwrap().unwrap();
+        }
     }
 }

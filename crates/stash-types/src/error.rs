@@ -36,19 +36,28 @@ pub type StashResult<T> = Result<T, StashError>;
 
 impl From<crate::InvalidPathReason> for StashError {
     fn from(r: crate::InvalidPathReason) -> Self {
-        StashError::InvalidPath { path: String::new(), reason: r.to_string() }
+        StashError::InvalidPath {
+            path: String::new(),
+            reason: r.to_string(),
+        }
     }
 }
 
 impl From<crate::InvalidSha> for StashError {
     fn from(r: crate::InvalidSha) -> Self {
-        StashError::InvalidInput { field: "sha".into(), reason: r.to_string() }
+        StashError::InvalidInput {
+            field: "sha".into(),
+            reason: r.to_string(),
+        }
     }
 }
 
 impl From<crate::InvalidIdentity> for StashError {
     fn from(r: crate::InvalidIdentity) -> Self {
-        StashError::InvalidInput { field: "identity".into(), reason: r.to_string() }
+        StashError::InvalidInput {
+            field: "identity".into(),
+            reason: r.to_string(),
+        }
     }
 }
 
@@ -59,7 +68,9 @@ mod tests {
 
     #[test]
     fn serializes_with_code_tag() {
-        let err = StashError::NotFound { path: StashPath::parse("docs/x.md").unwrap() };
+        let err = StashError::NotFound {
+            path: StashPath::parse("docs/x.md").unwrap(),
+        };
         let json = serde_json::to_value(&err).unwrap();
         assert_eq!(json["code"], "NotFound");
         assert_eq!(json["path"], "docs/x.md");
@@ -68,15 +79,31 @@ mod tests {
     #[test]
     fn round_trips_every_variant() {
         let variants = vec![
-            StashError::NotFound { path: StashPath::parse("a").unwrap() },
-            StashError::InvalidPath { path: "../x".into(), reason: "dotdot".into() },
-            StashError::InvalidInput { field: "glob".into(), reason: "bad".into() },
+            StashError::NotFound {
+                path: StashPath::parse("a").unwrap(),
+            },
+            StashError::InvalidPath {
+                path: "../x".into(),
+                reason: "dotdot".into(),
+            },
+            StashError::InvalidInput {
+                field: "glob".into(),
+                reason: "bad".into(),
+            },
             StashError::Unauthorized,
-            StashError::Forbidden { reason: "nope".into() },
-            StashError::Conflict { path: StashPath::parse("a").unwrap() },
+            StashError::Forbidden {
+                reason: "nope".into(),
+            },
+            StashError::Conflict {
+                path: StashPath::parse("a").unwrap(),
+            },
             StashError::TooLarge { limit: 10_485_760 },
-            StashError::RateLimited { retry_after_ms: 1000 },
-            StashError::Internal { trace_id: "abc123".into() },
+            StashError::RateLimited {
+                retry_after_ms: 1000,
+            },
+            StashError::Internal {
+                trace_id: "abc123".into(),
+            },
         ];
         for v in variants {
             let s = serde_json::to_string(&v).unwrap();

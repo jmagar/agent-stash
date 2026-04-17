@@ -1,1 +1,3 @@
-fn main() { println!("stub"); }
+fn main() {
+    println!("stub");
+}

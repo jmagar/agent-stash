@@ -3,10 +3,14 @@ use std::fmt;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum InvalidPathReason {
-    #[error("path is empty")]            Empty,
-    #[error("path contains `..` segment")] DotDot,
-    #[error("path contains NUL byte")]   Nul,
-    #[error("path longer than 1024 bytes")] TooLong,
+    #[error("path is empty")]
+    Empty,
+    #[error("path contains `..` segment")]
+    DotDot,
+    #[error("path contains NUL byte")]
+    Nul,
+    #[error("path longer than 1024 bytes")]
+    TooLong,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -19,9 +23,15 @@ impl StashPath {
 
         let raw = input.as_ref().trim();
         let trimmed = raw.trim_matches('/');
-        if trimmed.is_empty() { return Err(InvalidPathReason::Empty); }
-        if trimmed.as_bytes().contains(&0) { return Err(InvalidPathReason::Nul); }
-        if trimmed.len() > MAX { return Err(InvalidPathReason::TooLong); }
+        if trimmed.is_empty() {
+            return Err(InvalidPathReason::Empty);
+        }
+        if trimmed.as_bytes().contains(&0) {
+            return Err(InvalidPathReason::Nul);
+        }
+        if trimmed.len() > MAX {
+            return Err(InvalidPathReason::TooLong);
+        }
 
         // collapse duplicate slashes
         let collapsed: String = trimmed
@@ -37,20 +47,28 @@ impl StashPath {
 
         Ok(Self(collapsed.to_lowercase()))
     }
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl fmt::Display for StashPath {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.0) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 impl TryFrom<String> for StashPath {
     type Error = InvalidPathReason;
-    fn try_from(s: String) -> Result<Self, Self::Error> { Self::parse(s) }
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        Self::parse(s)
+    }
 }
 
 impl From<StashPath> for String {
-    fn from(p: StashPath) -> Self { p.0 }
+    fn from(p: StashPath) -> Self {
+        p.0
+    }
 }
 
 #[cfg(test)]
@@ -78,27 +96,31 @@ mod tests {
 
     #[test]
     fn rejects_empty() {
-        assert_matches!(StashPath::parse(""),   Err(InvalidPathReason::Empty));
-        assert_matches!(StashPath::parse("/"),  Err(InvalidPathReason::Empty));
+        assert_matches!(StashPath::parse(""), Err(InvalidPathReason::Empty));
+        assert_matches!(StashPath::parse("/"), Err(InvalidPathReason::Empty));
         assert_matches!(StashPath::parse("   "), Err(InvalidPathReason::Empty));
     }
 
     #[test]
     fn rejects_dotdot() {
-        assert_matches!(StashPath::parse("docs/../etc/passwd"),
-                        Err(InvalidPathReason::DotDot));
+        assert_matches!(
+            StashPath::parse("docs/../etc/passwd"),
+            Err(InvalidPathReason::DotDot)
+        );
         assert_matches!(StashPath::parse(".."), Err(InvalidPathReason::DotDot));
     }
 
     #[test]
     fn rejects_nul() {
-        assert_matches!(StashPath::parse("docs/\0/x.md"),
-                        Err(InvalidPathReason::Nul));
+        assert_matches!(
+            StashPath::parse("docs/\0/x.md"),
+            Err(InvalidPathReason::Nul)
+        );
     }
 
     #[test]
     fn rejects_too_long() {
-        let long = "a/".repeat(600);           // > 1024 bytes
+        let long = "a/".repeat(600); // > 1024 bytes
         assert_matches!(StashPath::parse(long), Err(InvalidPathReason::TooLong));
     }
 

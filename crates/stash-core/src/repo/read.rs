@@ -1,19 +1,23 @@
+use super::{git as git_helpers, StashRepo};
 use bytes::Bytes;
 use stash_types::{FileVersion, Identity, Sha, StashError, StashPath, StashResult, StorageTier};
-use super::{git as git_helpers, StashRepo};
 
 impl StashRepo {
     pub async fn read(
         &self,
         path: &StashPath,
-        at:   Option<Sha>,
+        at: Option<Sha>,
     ) -> StashResult<(FileVersion, Bytes)> {
         let path = path.clone();
         let repo_path = self.repo_path.clone();
         let path_for_err = path.clone();
 
-        let out = git_helpers::blocking(move || git_helpers::read_at(&repo_path, &path, at.as_ref())).await?;
-        let out = out.ok_or(StashError::NotFound { path: path_for_err.clone() })?;
+        let out =
+            git_helpers::blocking(move || git_helpers::read_at(&repo_path, &path, at.as_ref()))
+                .await?;
+        let out = out.ok_or(StashError::NotFound {
+            path: path_for_err.clone(),
+        })?;
 
         let ident = Identity::parse(&out.author_name)
             .unwrap_or_else(|_| Identity::new("unknown", "unknown").unwrap());
@@ -35,13 +39,14 @@ impl StashRepo {
 
 pub(crate) fn sniff_mime(path: &str) -> String {
     match path.rsplit_once('.').map(|(_, ext)| ext) {
-        Some("md")                 => "text/markdown",
-        Some("json")               => "application/json",
-        Some("toml")               => "application/toml",
+        Some("md") => "text/markdown",
+        Some("json") => "application/json",
+        Some("toml") => "application/toml",
         Some("yaml") | Some("yml") => "application/yaml",
-        Some("txt") | Some("log")  => "text/plain",
-        _                          => "application/octet-stream",
-    }.to_string()
+        Some("txt") | Some("log") => "text/plain",
+        _ => "application/octet-stream",
+    }
+    .to_string()
 }
 
 #[cfg(test)]
@@ -50,7 +55,9 @@ mod tests {
     use bytes::Bytes;
     use stash_types::{Identity, StashError, StashPath};
 
-    fn id() -> Identity { Identity::new("claude", "tootie").unwrap() }
+    fn id() -> Identity {
+        Identity::new("claude", "tootie").unwrap()
+    }
 
     #[tokio::test]
     async fn read_returns_latest_bytes_and_version() {
