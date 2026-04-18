@@ -2,14 +2,16 @@ use crate::{
     blob::store::blob_path,
     db::{db_err, Db},
 };
-use std::path::{Path, PathBuf};
 use stash_types::StashResult;
+use std::path::{Path, PathBuf};
 
+#[allow(dead_code)]
 pub struct GcStats {
     pub blobs_deleted: u64,
     pub bytes_freed: u64,
 }
 
+#[allow(dead_code)]
 pub async fn sweep_gc(db: &Db, blobs_dir: &Path, grace_days: u64) -> StashResult<GcStats> {
     let blobs_dir = blobs_dir.to_path_buf();
     db.run(move |conn| {
@@ -51,6 +53,7 @@ pub async fn sweep_gc(db: &Db, blobs_dir: &Path, grace_days: u64) -> StashResult
     .await
 }
 
+#[allow(dead_code)]
 pub fn spawn_gc_task(
     db: Db,
     blobs_dir: PathBuf,
@@ -75,7 +78,9 @@ mod tests {
     use bytes::Bytes;
 
     async fn make_store(td: &tempfile::TempDir) -> BlobStore {
-        let db = crate::db::Db::open(td.path().join("meta.db")).await.unwrap();
+        let db = crate::db::Db::open(td.path().join("meta.db"))
+            .await
+            .unwrap();
         BlobStore::new(td.path(), db)
     }
 

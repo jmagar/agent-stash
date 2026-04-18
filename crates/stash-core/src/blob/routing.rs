@@ -47,7 +47,10 @@ mod tests {
     #[test]
     fn small_text_routes_to_git() {
         let r = router();
-        assert_eq!(r.decide("docs/plan.md", 500, "text/markdown"), StorageTier::Git);
+        assert_eq!(
+            r.decide("docs/plan.md", 500, "text/markdown"),
+            StorageTier::Git
+        );
     }
 
     #[test]
@@ -81,6 +84,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn force_git_glob_overrides_mime() {
         let mut cfg = BlobConfig::default();
         cfg.force_git_globs = vec!["*.png".into()];
@@ -89,6 +93,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn force_git_glob_overrides_size() {
         let mut cfg = BlobConfig::default();
         cfg.force_git_globs = vec!["*.bin".into()];
