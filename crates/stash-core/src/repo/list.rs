@@ -76,6 +76,7 @@ impl StashRepo {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::StashConfig;
     use crate::StashRepo;
     use bytes::Bytes;
     use stash_types::{Identity, StashPath};
@@ -100,7 +101,9 @@ mod tests {
     #[tokio::test]
     async fn list_at_prefix_returns_matching_files() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         seed(
             &r,
             &["docs/a.md", "docs/b.md", "docs/sub/c.md", "README.md"],
@@ -121,7 +124,9 @@ mod tests {
     #[tokio::test]
     async fn list_with_glob_filters_matches() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         seed(&r, &["docs/a.md", "docs/b.txt", "docs/sub/c.md"]).await;
         let page = r
             .list(
@@ -140,7 +145,9 @@ mod tests {
     #[tokio::test]
     async fn list_paginates_with_stable_ordering() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         let names: Vec<String> = (0..5).map(|i| format!("d/{i:02}.md")).collect();
         seed(&r, &names.iter().map(|s| s.as_str()).collect::<Vec<_>>()).await;
         let p1 = r

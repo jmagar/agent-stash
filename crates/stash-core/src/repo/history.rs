@@ -59,6 +59,7 @@ impl StashRepo {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::StashConfig;
     use crate::StashRepo;
     use bytes::Bytes;
     use stash_types::{Identity, StashPath};
@@ -70,7 +71,9 @@ mod tests {
     #[tokio::test]
     async fn history_newest_first() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         let p = StashPath::parse("x.md").unwrap();
         let v1 = r
             .write(&p, Bytes::from("one"), &id(), Some("1".into()))
@@ -92,7 +95,9 @@ mod tests {
     #[tokio::test]
     async fn history_paginates() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         let p = StashPath::parse("x.md").unwrap();
         for i in 0..4 {
             r.write(&p, Bytes::from(format!("{i}")), &id(), None)

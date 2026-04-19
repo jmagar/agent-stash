@@ -81,6 +81,7 @@ fn diff_blobs(
 
 #[cfg(test)]
 mod tests {
+    use crate::config::StashConfig;
     use crate::StashRepo;
     use bytes::Bytes;
     use stash_types::{Identity, StashPath};
@@ -92,7 +93,9 @@ mod tests {
     #[tokio::test]
     async fn diff_shows_unified_output_between_commits() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         let p = StashPath::parse("x.md").unwrap();
         let v1 = r
             .write(&p, Bytes::from("hello\n"), &id(), None)
@@ -110,7 +113,9 @@ mod tests {
     #[tokio::test]
     async fn diff_empty_when_same_content() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         let p = StashPath::parse("x.md").unwrap();
         let v = r
             .write(&p, Bytes::from("one\n"), &id(), None)
@@ -123,7 +128,9 @@ mod tests {
     #[tokio::test]
     async fn diff_to_head_when_to_omitted() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         let p = StashPath::parse("x.md").unwrap();
         let v1 = r
             .write(&p, Bytes::from("one\n"), &id(), None)

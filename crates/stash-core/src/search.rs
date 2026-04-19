@@ -41,6 +41,13 @@ impl StashRepo {
                     break;
                 }
                 let blob = repo.find_blob(git2::Oid::from_str(e.blob_sha.as_str()).unwrap())?;
+                // Skip fully-validated blob-tier stubs — they are internal
+                // metadata, not user content. Use `parse_stub` (full validation)
+                // rather than `is_blob_stub` (prefix-only) to avoid skipping
+                // legitimate user content that merely starts with the magic bytes.
+                if crate::blob::stub::parse_stub(blob.content()).is_ok() {
+                    continue;
+                }
                 let content = match std::str::from_utf8(blob.content()) {
                     Ok(s) => s,
                     Err(_) => continue,
@@ -69,6 +76,7 @@ impl StashRepo {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::StashConfig;
     use crate::StashRepo;
     use bytes::Bytes;
     use stash_types::{Identity, StashPath};
@@ -93,7 +101,9 @@ mod tests {
     #[tokio::test]
     async fn search_returns_hits_with_line_and_snippet() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         seed(
             &r,
             &[
@@ -113,7 +123,9 @@ mod tests {
     #[tokio::test]
     async fn search_filters_by_glob() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         seed(&r, &[("docs/a.md", "foo\n"), ("docs/a.txt", "foo\n")]).await;
         let hits = r.search("foo", Some("**/*.md"), 10).await.unwrap();
         assert_eq!(hits.len(), 1);
@@ -123,7 +135,9 @@ mod tests {
     #[tokio::test]
     async fn search_respects_limit() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         use std::fmt::Write as _;
         let body = (0..5).fold(String::new(), |mut acc, i| {
             let _ = writeln!(acc, "x{i}");
@@ -132,5 +146,25 @@ mod tests {
         seed(&r, &[("a.md", &body)]).await;
         let hits = r.search("x", None, 2).await.unwrap();
         assert_eq!(hits.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn search_skips_blob_tier_stubs() {
+        let td = tempfile::tempdir().unwrap();
+        let mut cfg = StashConfig::default();
+        cfg.blob.max_git_bytes = 5;
+        cfg.blob.blob_mime_prefixes = vec![];
+        cfg.blob.blob_path_globs = vec![];
+        let r = StashRepo::init(td.path(), cfg).await.unwrap();
+        let p = StashPath::parse("data/file.bin").unwrap();
+        r.write(&p, Bytes::from(b"ABCDEFGH" as &[u8]), &id(), None)
+            .await
+            .unwrap();
+        // "stash:blob" would match stub content if we don't skip
+        let hits = r.search("stash:blob", None, 10).await.unwrap();
+        assert!(
+            hits.is_empty(),
+            "blob stubs should not appear in search results"
+        );
     }
 }
