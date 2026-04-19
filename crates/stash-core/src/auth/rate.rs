@@ -18,7 +18,13 @@ impl RateCounter {
 
     /// Record a request and return `Ok` if under `limit_per_minute`, else
     /// `RateLimited { retry_after_ms }`.
+    ///
+    /// If `limit_per_minute` is 0, rate limiting is disabled and this always
+    /// returns `Ok(())` without recording a hit.
     pub fn check_and_incr(&self, id: &TokenId, limit_per_minute: u32) -> StashResult<()> {
+        if limit_per_minute == 0 {
+            return Ok(());
+        }
         let mut guard = self.inner.lock().map_err(|_| StashError::Internal {
             trace_id: "rate-lock-poisoned".into(),
         })?;
@@ -27,6 +33,8 @@ impl RateCounter {
         let hits = guard.entry(id.clone()).or_default();
         hits.retain(|t| now.duration_since(*t) < window);
         if hits.len() as u32 >= limit_per_minute {
+            // hits is non-empty here because limit_per_minute > 0 and the
+            // condition `hits.len() >= limit_per_minute` holds.
             let retry_after = window - now.duration_since(*hits.first().unwrap());
             return Err(StashError::RateLimited {
                 retry_after_ms: retry_after.as_millis() as u64,

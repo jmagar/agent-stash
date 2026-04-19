@@ -180,6 +180,16 @@ mod tests {
     }
 
     #[test]
+    fn write_stub_rejects_newline_in_field() {
+        let mut bad = sample();
+        bad.mime = "text/plain\nevil: injected".into();
+        assert!(write_stub(&bad).is_err());
+        let mut bad2 = sample();
+        bad2.original_name = "file\r\nX-Injected: yes".into();
+        assert!(write_stub(&bad2).is_err());
+    }
+
+    #[test]
     fn is_blob_stub_requires_exact_header() {
         assert!(is_blob_stub(b"# stash:blob/v1\nextra"));
         assert!(!is_blob_stub(b"# stash:blob/v2\n"));

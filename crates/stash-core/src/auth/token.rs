@@ -11,11 +11,20 @@ use zeroize::Zeroize;
 ///
 /// Holds the plaintext; return from `mint` _once_ and drop. Never stored.
 #[allow(dead_code)]
-#[derive(Debug)]
 pub struct Token {
     pub id: TokenId,
     pub secret: Secret,
     bearer: String,
+}
+
+impl std::fmt::Debug for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Token")
+            .field("id", &self.id)
+            .field("secret", &self.secret)
+            .field("bearer", &"[REDACTED]")
+            .finish()
+    }
 }
 
 #[allow(dead_code)]

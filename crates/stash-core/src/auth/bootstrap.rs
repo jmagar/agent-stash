@@ -38,7 +38,15 @@ pub async fn ensure_admin_token(
     let (rec, tok) = auth
         .mint("admin", "bootstrap", Permission::MintOnly, Some(expires))
         .await?;
-    write_admin_file(root, tok.expose())?;
+    // If anything after the mint fails, revoke the token before returning the
+    // error so an observer (e.g. log reader) cannot use a dangling admin token.
+    match write_admin_file(root, tok.expose()) {
+        Ok(()) => {}
+        Err(e) => {
+            let _ = auth.revoke(&rec.id).await; // best-effort revocation
+            return Err(e);
+        }
+    }
     Ok(Bootstrap::Minted {
         bearer: tok.expose().to_string(),
         token_id: rec.id,

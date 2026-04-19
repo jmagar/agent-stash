@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde::de;
 use std::fmt;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -12,7 +13,7 @@ pub enum InvalidTokenId {
 
 /// Public, non-secret token identifier. Shape: `tk_` + 16 lowercase hex chars.
 /// Example: `tk_0123456789abcdef`. Safe to log.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct TokenId(String);
 
@@ -38,6 +39,13 @@ impl TokenId {
 impl fmt::Display for TokenId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for TokenId {
+    fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        TokenId::parse(&s).map_err(de::Error::custom)
     }
 }
 
