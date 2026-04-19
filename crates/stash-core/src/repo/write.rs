@@ -50,11 +50,21 @@ impl StashRepo {
             uploaded_by: ident.to_string(),
         }));
 
-        let mut git_ver = self.write_git(path, stub_bytes, ident, msg).await?;
-        git_ver.size = size;
-        git_ver.mime = mime;
-        git_ver.tier = StorageTier::Blob;
-        Ok(git_ver)
+        match self.write_git(path, stub_bytes, ident, msg).await {
+            Ok(mut git_ver) => {
+                git_ver.size = size;
+                git_ver.mime = mime;
+                git_ver.tier = StorageTier::Blob;
+                Ok(git_ver)
+            }
+            Err(e) => {
+                // Best-effort rollback: decrement refcount so GC can eventually
+                // reclaim the blob. If this also fails, the blob is over-counted
+                // but safe — GC won't touch blobs with refcount > 0.
+                let _ = self.blob_store.release(&blob_ref.sha256).await;
+                Err(e)
+            }
+        }
     }
 
     /// Write bytes directly into git. Caller MUST hold `write_lock`.
