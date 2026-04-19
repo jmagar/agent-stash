@@ -48,6 +48,20 @@ impl StashRepo {
     ) -> StashResult<FileVersion> {
         let blob_ref: BlobRef = self.blob_store.store(&bytes, &mime).await?;
 
+        // CRASH WINDOW: between store() above (which increments the refcount)
+        // and write_git() below (which writes the stub into git), a hard crash
+        // (OOM, SIGKILL) leaves refcount >= 1 with no git stub referencing the
+        // blob — a permanent orphan unreachable by GC. The graceful Err path
+        // below calls release() to undo the refcount, but a hard crash bypasses
+        // it.
+        // TODO: implement orphan reconciliation — a startup sweep or `stash fsck`
+        // command should walk blob_refs and release rows whose SHA appears in no
+        // git commit.
+        tracing::warn!(
+            sha = %blob_ref.sha256,
+            "write_blob_tier: refcount incremented — crash before write_git completes leaves orphan blob"
+        );
+
         let stub_bytes = Bytes::from(write_stub(&BlobStub {
             sha256: blob_ref.sha256.clone(),
             size: blob_ref.size,

@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 
 fn validate_sha256(sha: &str) -> StashResult<()> {
     if sha.len() != 64 || !sha.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+        tracing::warn!(sha = %sha, "invalid sha256 input");
         return Err(StashError::Internal {
-            trace_id: format!("invalid-sha256:{sha}"),
+            trace_id: "invalid-sha256".to_string(),
         });
     }
     Ok(())
@@ -52,23 +53,18 @@ impl BlobStore {
                 let size = data.len() as u64;
                 let now = chrono::Utc::now().to_rfc3339();
 
-                // Make the DB the authoritative source of truth using an UPSERT.
-                // This avoids the INSERT-vs-UPDATE race that arose from using the
-                // filesystem existence check to decide which branch to take.
-                conn.execute(
-                    "INSERT INTO blob_refs(sha,refcount,size_bytes,mime,created_at,last_ref_at)
-                     VALUES(?1,1,?2,?3,?4,?4)
-                     ON CONFLICT(sha) DO UPDATE
-                       SET refcount    = refcount + 1,
-                           last_ref_at = excluded.last_ref_at",
-                    rusqlite::params![sha, size as i64, mime, now],
-                )
-                .map_err(db_err)?;
-
-                // Write the blob file only after the DB row is committed so that
-                // a crash between write and DB insert can never leave an orphaned
-                // blob. The file write is idempotent: if the content-addressed
-                // file already exists the rename is a no-op on the same inode.
+                // Write the file first, then UPSERT the DB row. This ordering
+                // prevents phantom refcounts: if the file write fails, the DB is
+                // never touched and the state remains clean. If the DB UPSERT
+                // fails after a successful file write, an orphan file may exist
+                // but carries no phantom refcount — orphan files can be swept by
+                // a future `stash fsck`. The reverse order (DB first) would leave
+                // a permanently incremented refcount with no backing file on disk,
+                // making the blob GC-ineligible forever.
+                //
+                // The file write is idempotent: content-addressed path means an
+                // existing file has identical bytes; the `if !path.exists()` guard
+                // skips the write entirely for already-stored blobs.
                 let path = blob_path(&blobs_dir, &sha)?;
                 if !path.exists() {
                     if let Some(parent) = path.parent() {
@@ -80,6 +76,18 @@ impl BlobStore {
                     std::fs::write(&tmp, &data[..]).map_err(io_err)?;
                     std::fs::rename(&tmp, &path).map_err(io_err)?;
                 }
+
+                // File is safely on disk; now make the DB the authoritative source
+                // of truth using an UPSERT.
+                conn.execute(
+                    "INSERT INTO blob_refs(sha,refcount,size_bytes,mime,created_at,last_ref_at)
+                     VALUES(?1,1,?2,?3,?4,?4)
+                     ON CONFLICT(sha) DO UPDATE
+                       SET refcount    = refcount + 1,
+                           last_ref_at = excluded.last_ref_at",
+                    rusqlite::params![sha, size as i64, mime, now],
+                )
+                .map_err(db_err)?;
 
                 Ok(BlobRef {
                     sha256: sha,

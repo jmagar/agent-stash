@@ -13,24 +13,17 @@ impl StashRepo {
         // Read current git blob to detect blob-tier stub before tombstoning.
         let (_, raw) = self.read_raw_git(path).await?;
 
-        // Best-effort: if the stub is malformed, log a warning so the
-        // inconsistency is visible in logs, then continue without releasing
-        // the refcount. The blob will be over-counted until a future repair
-        // utility reconciles it; this is preferable to blocking the delete.
-        let blob_sha: Option<String> = if crate::blob::stub::is_blob_stub(&raw) {
-            match crate::blob::stub::parse_stub(&raw) {
-                Ok(stub) => Some(stub.sha256),
-                Err(e) => {
-                    tracing::warn!(
-                        path = %path,
-                        error = ?e,
-                        "delete: malformed blob stub — skipping refcount release"
-                    );
-                    None
-                }
-            }
-        } else {
-            None
+        // Use full stub parsing (not just a header-prefix check) so that a
+        // user-crafted git file starting with the magic header cannot trigger a
+        // refcount decrement for an arbitrary SHA. `parse_stub` validates the
+        // full structure including a hex-only SHA field before we trust it.
+        // Best-effort: if the stub is malformed, log a warning and continue
+        // without releasing the refcount. The blob will be over-counted until a
+        // future repair utility reconciles it; this is preferable to blocking the
+        // delete.
+        let blob_sha: Option<String> = match crate::blob::stub::parse_stub(&raw) {
+            Ok(stub) => Some(stub.sha256),
+            Err(_) => None,
         };
         let tier = if blob_sha.is_some() {
             StorageTier::Blob
@@ -64,7 +57,18 @@ impl StashRepo {
         // `gc_grace_days` can be raised in `StashConfig`. This design means
         // calling `release()` here is safe even when history exists.
         if let Some(sha) = blob_sha {
-            self.blob_store.release(&sha).await?;
+            // The git tombstone is already committed (irreversible at this point).
+            // Propagating a release() error via `?` would make the caller see a
+            // failure even though the delete succeeded, and on retry the refcount
+            // decrement would be lost — leaving the blob permanently over-counted
+            // and GC-ineligible. Warn-and-continue is the correct policy here.
+            if let Err(e) = self.blob_store.release(&sha).await {
+                tracing::warn!(
+                    sha = %sha,
+                    error = ?e,
+                    "delete: refcount release failed after git commit — blob over-counted until reconciled"
+                );
+            }
         }
 
         Ok(FileVersion {
