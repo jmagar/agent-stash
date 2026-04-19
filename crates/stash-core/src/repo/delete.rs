@@ -54,6 +54,15 @@ impl StashRepo {
         })?;
 
         // Release blob refcount after git commit succeeds.
+        //
+        // Safety reasoning: `release()` only decrements the refcount in the DB;
+        // it does NOT immediately delete the blob file. The GC sweeper only
+        // removes blobs whose refcount has been zero AND whose `last_ref_at`
+        // timestamp is older than `gc_grace_days` (default: 7 days). Historical
+        // git commits that still reference this blob therefore remain readable
+        // throughout the grace period. If the operator needs longer retention,
+        // `gc_grace_days` can be raised in `StashConfig`. This design means
+        // calling `release()` here is safe even when history exists.
         if let Some(sha) = blob_sha {
             self.blob_store.release(&sha).await?;
         }

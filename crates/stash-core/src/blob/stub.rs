@@ -28,10 +28,10 @@ pub fn write_stub(stub: &BlobStub) -> StashResult<Vec<u8>> {
         ("original_name", &stub.original_name),
         ("uploaded_by", &stub.uploaded_by),
     ] {
-        if val.contains('\n') || val.contains('\r') {
+        if val.chars().any(|c| c.is_ascii_control()) {
             return Err(StashError::InvalidInput {
                 field: name.to_string(),
-                reason: "field must not contain line-break characters".to_string(),
+                reason: "field must not contain ASCII control characters".to_string(),
             });
         }
     }
@@ -84,8 +84,17 @@ pub fn parse_stub(data: &[u8]) -> StashResult<BlobStub> {
             .bytes()
             .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
     {
+        // Use an opaque trace_id rather than including the raw SHA value from
+        // the stub. The stub is user-controlled, so embedding the value could
+        // allow injection of arbitrary content into error logs and traces.
+        // The actual invalid value is logged separately so operators can
+        // diagnose without exposing it through the error surface.
+        tracing::warn!(
+            invalid_sha256 = %sha256,
+            "parse_stub: rejected stub with invalid sha256 field"
+        );
         return Err(StashError::Internal {
-            trace_id: format!("stub:invalid-sha256:{sha256}"),
+            trace_id: "stub:invalid-sha256".into(),
         });
     }
 
@@ -178,13 +187,25 @@ mod tests {
     }
 
     #[test]
-    fn write_stub_rejects_newline_in_field() {
+    fn write_stub_rejects_ascii_control_chars_in_field() {
+        // Newline injection
         let mut bad = sample();
         bad.mime = "text/plain\ninjected: evil".into();
         assert!(write_stub(&bad).is_err());
 
+        // CRLF injection
         let mut bad2 = sample();
         bad2.original_name = "file\r\nX-Header: injected".into();
         assert!(write_stub(&bad2).is_err());
+
+        // Null byte
+        let mut bad3 = sample();
+        bad3.uploaded_by = "user\x00evil".into();
+        assert!(write_stub(&bad3).is_err());
+
+        // Other control char (BEL = 0x07)
+        let mut bad4 = sample();
+        bad4.mime = "text/plain\x07".into();
+        assert!(write_stub(&bad4).is_err());
     }
 }

@@ -1,5 +1,6 @@
 use super::{git as git_helpers, StashRepo};
 use bytes::Bytes;
+use sha2::{Digest, Sha256};
 use stash_types::{FileVersion, Identity, Sha, StashError, StashPath, StashResult, StorageTier};
 
 impl StashRepo {
@@ -29,6 +30,23 @@ impl StashRepo {
             match crate::blob::stub::parse_stub(&out.bytes) {
                 Ok(stub) => {
                     let blob_bytes = self.blob_store.fetch(&stub.sha256).await?;
+
+                    // Verify integrity: the SHA-256 of the returned bytes must
+                    // match the digest stored in the stub. A mismatch indicates
+                    // on-disk corruption or blob store tampering; return an
+                    // error rather than silently serving corrupt data.
+                    let actual_sha256 = hex::encode(Sha256::digest(&blob_bytes[..]));
+                    if actual_sha256 != stub.sha256 {
+                        tracing::error!(
+                            expected = %stub.sha256,
+                            actual   = %actual_sha256,
+                            "read: blob integrity check failed — digest mismatch"
+                        );
+                        return Err(StashError::Internal {
+                            trace_id: "blob:digest-mismatch".into(),
+                        });
+                    }
+
                     let ident = Identity::parse(&out.author_name)
                         .unwrap_or_else(|_| Identity::new("unknown", "unknown").unwrap());
                     let version = FileVersion {

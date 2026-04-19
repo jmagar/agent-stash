@@ -4,7 +4,7 @@ use crate::blob::{
     BlobRef,
 };
 use bytes::Bytes;
-use stash_types::{FileVersion, Identity, StashPath, StashResult, StorageTier};
+use stash_types::{FileVersion, Identity, StashError, StashPath, StashResult, StorageTier};
 
 impl StashRepo {
     pub async fn write(
@@ -16,8 +16,17 @@ impl StashRepo {
     ) -> StashResult<FileVersion> {
         let _g = self.write_lock.lock().await;
 
-        let mime = super::read::sniff_mime(path.as_str());
+        // Enforce the configured body size limit before any tier routing or
+        // storage occurs. This prevents over-large payloads from consuming
+        // blob storage resources regardless of which tier they would land on.
         let size = bytes.len() as u64;
+        if size > self.max_body {
+            return Err(StashError::TooLarge {
+                limit: self.max_body,
+            });
+        }
+
+        let mime = super::read::sniff_mime(path.as_str());
         let tier = self.router.decide(path.as_str(), size, &mime);
 
         if tier == StorageTier::Blob {

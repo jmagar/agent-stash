@@ -30,6 +30,9 @@ pub struct StashRepo {
     pub(crate) router: TierRouter,
     #[allow(dead_code)]
     pub(crate) db: Db,
+    /// Maximum allowed body size in bytes. Writes exceeding this limit are
+    /// rejected before any tier routing or storage occurs.
+    pub(crate) max_body: u64,
     /// Handle for the background GC task. Aborted automatically when
     /// `StashRepo` is dropped, preventing unbounded task accumulation.
     _gc_handle: tokio::task::JoinHandle<()>,
@@ -52,6 +55,7 @@ impl StashRepo {
         let db = Db::open(root.join("meta.db")).await?;
         let blob_store = BlobStore::new(&root, db.clone());
         let router = TierRouter::new(config.blob.clone())?;
+        let max_body = config.max_body;
         let _gc_handle = spawn_gc_task(
             db.clone(),
             root.join("blobs"),
@@ -65,6 +69,7 @@ impl StashRepo {
             blob_store,
             router,
             db,
+            max_body,
             _gc_handle,
         })
     }
@@ -85,6 +90,7 @@ impl StashRepo {
         let db = Db::open(root.join("meta.db")).await?;
         let blob_store = BlobStore::new(&root, db.clone());
         let router = TierRouter::new(config.blob.clone())?;
+        let max_body = config.max_body;
         let _gc_handle = spawn_gc_task(
             db.clone(),
             root.join("blobs"),
@@ -98,6 +104,7 @@ impl StashRepo {
             blob_store,
             router,
             db,
+            max_body,
             _gc_handle,
         })
     }
