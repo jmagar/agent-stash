@@ -8,6 +8,8 @@ repository.workspace   = true
 
 [dependencies]
 stash-types = { path = "../stash-types" }
+argon2      = { workspace = true }
+base32      = { workspace = true }
 tokio       = { workspace = true }
 bytes       = { workspace = true }
 chrono      = { workspace = true }
@@ -15,11 +17,13 @@ serde       = { workspace = true }
 thiserror   = { workspace = true }
 git2        = { workspace = true }
 glob        = { workspace = true }
+rand        = { workspace = true }
 regex       = "1"
 rusqlite    = { workspace = true }
 sha2        = { workspace = true }
 hex         = { workspace = true }
 tracing     = { workspace = true }
+zeroize     = { workspace = true }
 
 [dev-dependencies]
 tempfile       = { workspace = true }
