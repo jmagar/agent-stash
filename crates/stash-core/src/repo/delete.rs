@@ -13,9 +13,14 @@ impl StashRepo {
         // Read current git blob to detect blob-tier stub before tombstoning.
         let (_, raw) = self.read_raw_git(path).await?;
 
+        // Best-effort: if the stub is malformed, skip the refcount release rather
+        // than blocking the delete. The blob will be over-counted until GC detects
+        // that no valid stub references it (future repair utility).
         let blob_sha: Option<String> = if crate::blob::stub::is_blob_stub(&raw) {
-            let stub = crate::blob::stub::parse_stub(&raw)?;
-            Some(stub.sha256)
+            match crate::blob::stub::parse_stub(&raw) {
+                Ok(stub) => Some(stub.sha256),
+                Err(_) => None,
+            }
         } else {
             None
         };
@@ -61,8 +66,8 @@ impl StashRepo {
 
 #[cfg(test)]
 mod tests {
-    use crate::StashRepo;
     use crate::config::StashConfig;
+    use crate::StashRepo;
     use bytes::Bytes;
     use stash_types::{Identity, StashError, StashPath};
 
@@ -73,7 +78,9 @@ mod tests {
     #[tokio::test]
     async fn delete_removes_file_from_head() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         let p = StashPath::parse("docs/x.md").unwrap();
         r.write(&p, Bytes::from("hi"), &id(), None).await.unwrap();
         let v = r.delete(&p, &id(), Some("gone".into())).await.unwrap();
@@ -86,7 +93,9 @@ mod tests {
     #[tokio::test]
     async fn delete_missing_returns_not_found() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         let err = r
             .delete(&StashPath::parse("nope.md").unwrap(), &id(), None)
             .await
@@ -97,7 +106,9 @@ mod tests {
     #[tokio::test]
     async fn deleted_file_readable_at_prior_commit() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         let p = StashPath::parse("docs/x.md").unwrap();
         let v1 = r.write(&p, Bytes::from("orig"), &id(), None).await.unwrap();
         r.delete(&p, &id(), None).await.unwrap();
