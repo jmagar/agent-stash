@@ -1,5 +1,5 @@
 use crate::{
-    blob::{BlobStore, TierRouter},
+    blob::{spawn_gc_task, BlobStore, TierRouter},
     config::StashConfig,
     db::Db,
 };
@@ -28,6 +28,7 @@ pub struct StashRepo {
     pub(crate) write_lock: Arc<Mutex<()>>,
     pub(crate) blob_store: BlobStore,
     pub(crate) router: TierRouter,
+    #[allow(dead_code)]
     pub(crate) db: Db,
 }
 
@@ -48,6 +49,12 @@ impl StashRepo {
         let db = Db::open(root.join("meta.db")).await?;
         let blob_store = BlobStore::new(&root, db.clone());
         let router = TierRouter::new(config.blob.clone());
+        spawn_gc_task(
+            db.clone(),
+            root.join("blobs"),
+            config.blob.gc_interval_secs,
+            config.blob.gc_grace_days,
+        );
         Ok(Self {
             root,
             repo_path,
@@ -66,6 +73,12 @@ impl StashRepo {
         let db = Db::open(root.join("meta.db")).await?;
         let blob_store = BlobStore::new(&root, db.clone());
         let router = TierRouter::new(config.blob.clone());
+        spawn_gc_task(
+            db.clone(),
+            root.join("blobs"),
+            config.blob.gc_interval_secs,
+            config.blob.gc_grace_days,
+        );
         Ok(Self {
             root,
             repo_path,
@@ -89,7 +102,9 @@ mod tests {
     #[tokio::test]
     async fn init_creates_bare_repo_with_main_branch() {
         let td = tempfile::tempdir().unwrap();
-        let _repo = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
+        let _repo = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         let gitdir = td.path().join("repo.git");
         assert!(gitdir.is_dir(), "repo.git not created");
         assert!(gitdir.join("HEAD").is_file(), "bare repo layout missing");
@@ -103,7 +118,9 @@ mod tests {
     #[tokio::test]
     async fn open_errors_when_missing() {
         let td = tempfile::tempdir().unwrap();
-        let err = StashRepo::open(td.path(), StashConfig::default()).await.unwrap_err();
+        let err = StashRepo::open(td.path(), StashConfig::default())
+            .await
+            .unwrap_err();
         assert!(
             matches!(err, StashError::Internal { .. }),
             "expected Internal, got {err:?}"
@@ -113,14 +130,20 @@ mod tests {
     #[tokio::test]
     async fn init_then_open_roundtrips() {
         let td = tempfile::tempdir().unwrap();
-        StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
-        let _repo = StashRepo::open(td.path(), StashConfig::default()).await.unwrap();
+        StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
+        let _repo = StashRepo::open(td.path(), StashConfig::default())
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
     async fn init_creates_meta_db() {
         let td = tempfile::tempdir().unwrap();
-        StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
+        StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         assert!(td.path().join("meta.db").exists());
     }
 }
