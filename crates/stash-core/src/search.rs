@@ -73,8 +73,8 @@ impl StashRepo {
 
 #[cfg(test)]
 mod tests {
-    use crate::StashRepo;
     use crate::config::StashConfig;
+    use crate::StashRepo;
     use bytes::Bytes;
     use stash_types::{Identity, StashPath};
 
@@ -98,7 +98,9 @@ mod tests {
     #[tokio::test]
     async fn search_returns_hits_with_line_and_snippet() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         seed(
             &r,
             &[
@@ -118,7 +120,9 @@ mod tests {
     #[tokio::test]
     async fn search_filters_by_glob() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         seed(&r, &[("docs/a.md", "foo\n"), ("docs/a.txt", "foo\n")]).await;
         let hits = r.search("foo", Some("**/*.md"), 10).await.unwrap();
         assert_eq!(hits.len(), 1);
@@ -128,7 +132,9 @@ mod tests {
     #[tokio::test]
     async fn search_respects_limit() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         use std::fmt::Write as _;
         let body = (0..5).fold(String::new(), |mut acc, i| {
             let _ = writeln!(acc, "x{i}");
@@ -153,6 +159,9 @@ mod tests {
             .unwrap();
         // "stash:blob" would match stub content if we don't skip
         let hits = r.search("stash:blob", None, 10).await.unwrap();
-        assert!(hits.is_empty(), "blob stubs should not appear in search results");
+        assert!(
+            hits.is_empty(),
+            "blob stubs should not appear in search results"
+        );
     }
 }

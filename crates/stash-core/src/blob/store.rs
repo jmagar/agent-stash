@@ -5,11 +5,7 @@ use stash_types::{StashError, StashResult};
 use std::path::{Path, PathBuf};
 
 fn validate_sha256(sha: &str) -> StashResult<()> {
-    if sha.len() != 64
-        || !sha
-            .bytes()
-            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
-    {
+    if sha.len() != 64 || !sha.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
         return Err(StashError::Internal {
             trace_id: format!("invalid-sha256:{sha}"),
         });
@@ -159,10 +155,7 @@ mod tests {
     async fn store_writes_file_and_returns_ref() {
         let (store, _td) = make_store().await;
         let data = Bytes::from("hello blob");
-        let r = store
-            .store(&data, "text/plain")
-            .await
-            .unwrap();
+        let r = store.store(&data, "text/plain").await.unwrap();
         assert_eq!(r.size, 10);
         assert_eq!(r.mime, "text/plain");
         assert!(!r.sha256.is_empty());
@@ -172,14 +165,8 @@ mod tests {
     async fn store_deduplicates_same_content() {
         let (store, td) = make_store().await;
         let data = Bytes::from("duplicate content");
-        let r1 = store
-            .store(&data, "text/plain")
-            .await
-            .unwrap();
-        let r2 = store
-            .store(&data, "text/plain")
-            .await
-            .unwrap();
+        let r1 = store.store(&data, "text/plain").await.unwrap();
+        let r2 = store.store(&data, "text/plain").await.unwrap();
         assert_eq!(r1.sha256, r2.sha256);
         let path = blob_path(td.path().join("blobs").as_path(), &r1.sha256);
         assert!(path.exists());
@@ -189,10 +176,7 @@ mod tests {
     async fn fetch_returns_stored_bytes() {
         let (store, _td) = make_store().await;
         let data = Bytes::from("fetch me");
-        let r = store
-            .store(&data, "text/plain")
-            .await
-            .unwrap();
+        let r = store.store(&data, "text/plain").await.unwrap();
         let fetched = store.fetch(&r.sha256).await.unwrap();
         assert_eq!(&fetched[..], b"fetch me");
     }
@@ -201,10 +185,7 @@ mod tests {
     async fn release_decrements_refcount() {
         let (store, _td) = make_store().await;
         let data = Bytes::from("release me");
-        let r = store
-            .store(&data, "text/plain")
-            .await
-            .unwrap();
+        let r = store.store(&data, "text/plain").await.unwrap();
         store.release(&r.sha256).await.unwrap();
         let count: i64 = store
             .db
@@ -228,14 +209,8 @@ mod tests {
     async fn duplicate_store_increments_refcount() {
         let (store, _td) = make_store().await;
         let data = Bytes::from("shared content");
-        let r = store
-            .store(&data, "text/plain")
-            .await
-            .unwrap();
-        store
-            .store(&data, "text/plain")
-            .await
-            .unwrap();
+        let r = store.store(&data, "text/plain").await.unwrap();
+        store.store(&data, "text/plain").await.unwrap();
         let count: i64 = store
             .db
             .run({

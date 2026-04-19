@@ -1032,6 +1032,7 @@ dependencies = [
  "rstest",
  "rusqlite",
  "serde",
+ "serde_json",
  "sha2",
  "stash-types",
  "tempfile",

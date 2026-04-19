@@ -45,9 +45,11 @@ pub fn parse_stub(data: &[u8]) -> StashResult<BlobStub> {
     })?;
 
     // Verify the first line is exactly our magic header before trusting the rest.
-    let rest = text.strip_prefix(HEADER).ok_or_else(|| StashError::Internal {
-        trace_id: "stub:bad-header".into(),
-    })?;
+    let rest = text
+        .strip_prefix(HEADER)
+        .ok_or_else(|| StashError::Internal {
+            trace_id: "stub:bad-header".into(),
+        })?;
 
     let mut sha256: Option<String> = None;
     let mut size: Option<u64> = None;

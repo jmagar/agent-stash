@@ -37,10 +37,7 @@ impl StashRepo {
         mime: String,
         size: u64,
     ) -> StashResult<FileVersion> {
-        let blob_ref: BlobRef = self
-            .blob_store
-            .store(&bytes, &mime)
-            .await?;
+        let blob_ref: BlobRef = self.blob_store.store(&bytes, &mime).await?;
 
         let stub_bytes = Bytes::from(write_stub(&BlobStub {
             sha256: blob_ref.sha256.clone(),
