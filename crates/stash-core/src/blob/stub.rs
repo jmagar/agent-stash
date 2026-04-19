@@ -19,8 +19,9 @@ pub fn is_blob_stub(data: &[u8]) -> bool {
 }
 
 /// Emit a stub. Returns `Err(StashError::InvalidInput)` if any field contains
-/// a newline or carriage-return character, which would corrupt the line-oriented
-/// stub format in both debug and release builds.
+/// an ASCII control character (including newlines), which would corrupt the
+/// line-oriented stub format. This validation is enforced in all build modes;
+/// there is no silent truncation or empty-bytes fallback.
 pub fn write_stub(stub: &BlobStub) -> StashResult<Vec<u8>> {
     for (name, val) in [
         ("sha256", &stub.sha256),
@@ -177,6 +178,16 @@ mod tests {
             "../evil/path/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         );
         assert!(parse_stub(bad.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn write_stub_rejects_newline_in_field() {
+        let mut bad = sample();
+        bad.mime = "text/plain\nevil: injected".into();
+        assert!(write_stub(&bad).is_err());
+        let mut bad2 = sample();
+        bad2.original_name = "file\r\nX-Injected: yes".into();
+        assert!(write_stub(&bad2).is_err());
     }
 
     #[test]

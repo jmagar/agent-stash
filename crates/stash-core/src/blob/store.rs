@@ -7,8 +7,9 @@ use std::path::{Path, PathBuf};
 fn validate_sha256(sha: &str) -> StashResult<()> {
     if sha.len() != 64 || !sha.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
         tracing::warn!(sha = %sha, "invalid sha256 input");
-        return Err(StashError::Internal {
-            trace_id: "invalid-sha256".to_string(),
+        return Err(StashError::InvalidInput {
+            field: "sha256".into(),
+            reason: "malformed SHA-256 digest (expected 64 lowercase hex chars)".into(),
         });
     }
     Ok(())

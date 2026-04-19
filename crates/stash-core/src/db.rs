@@ -109,4 +109,79 @@ mod tests {
         Db::open(&path).await.unwrap();
         Db::open(&path).await.unwrap();
     }
+
+    #[tokio::test]
+    async fn migrations_create_tokens_table() {
+        let td = tempfile::tempdir().unwrap();
+        let db = Db::open(td.path().join("meta.db")).await.unwrap();
+        db.run(|c| {
+            let cnt: i64 = c
+                .query_row("SELECT COUNT(*) FROM tokens", [], |r| r.get(0))
+                .map_err(db_err)?;
+            assert_eq!(cnt, 0);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn migrations_create_audit_table() {
+        let td = tempfile::tempdir().unwrap();
+        let db = Db::open(td.path().join("meta.db")).await.unwrap();
+        db.run(|c| {
+            let cnt: i64 = c
+                .query_row("SELECT COUNT(*) FROM audit", [], |r| r.get(0))
+                .map_err(db_err)?;
+            assert_eq!(cnt, 0);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn migrations_enforce_live_identity_uniqueness() {
+        let td = tempfile::tempdir().unwrap();
+        let db = Db::open(td.path().join("meta.db")).await.unwrap();
+        // Two live rows for same (agent,device) must fail.
+        db.run(|c| {
+            c.execute(
+                "INSERT INTO tokens (id, hash, agent, device, permission, created_at)
+                 VALUES ('tk_aaaaaaaaaaaaaaaa', x'00', 'claude', 'tootie', 'full', 1000)",
+                [],
+            )
+            .map_err(db_err)?;
+            let second = c.execute(
+                "INSERT INTO tokens (id, hash, agent, device, permission, created_at)
+                 VALUES ('tk_bbbbbbbbbbbbbbbb', x'00', 'claude', 'tootie', 'full', 2000)",
+                [],
+            );
+            assert!(
+                second.is_err(),
+                "partial unique index should reject second live row"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        // Revoke the first; a new live row must be allowed.
+        db.run(|c| {
+            c.execute(
+                "UPDATE tokens SET revoked_at = 1500 WHERE id = 'tk_aaaaaaaaaaaaaaaa'",
+                [],
+            )
+            .map_err(db_err)?;
+            c.execute(
+                "INSERT INTO tokens (id, hash, agent, device, permission, created_at)
+                 VALUES ('tk_cccccccccccccccc', x'00', 'claude', 'tootie', 'full', 2500)",
+                [],
+            )
+            .map_err(db_err)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
 }
