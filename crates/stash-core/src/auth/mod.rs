@@ -6,6 +6,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use stash_types::{Identity, Permission, StashError, StashPath, StashResult, TokenId, TokenRecord};
 use token::{hash_secret, Token};
 
+#[derive(Clone)]
 pub struct AuthService {
     db: Db,
     cfg: AuthConfig,
@@ -112,6 +113,150 @@ impl AuthService {
 
         Ok(())
     }
+
+    /// List tokens, optionally filtered to live-only records, newest first.
+    pub async fn list(&self, filter: ListFilter) -> StashResult<Vec<TokenRecord>> {
+        self.db
+            .run(move |conn| {
+                let sql = match filter {
+                    ListFilter::Live => {
+                        "SELECT id, agent, device, permission, created_at, \
+                         expires_at, last_used, revoked_at \
+                         FROM tokens WHERE revoked_at IS NULL \
+                         ORDER BY created_at DESC"
+                    }
+                    ListFilter::All => {
+                        "SELECT id, agent, device, permission, created_at, \
+                         expires_at, last_used, revoked_at \
+                         FROM tokens ORDER BY created_at DESC"
+                    }
+                };
+                let mut stmt = conn.prepare(sql).map_err(db_err)?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, i64>(4)?,
+                            row.get::<_, Option<i64>>(5)?,
+                            row.get::<_, Option<i64>>(6)?,
+                            row.get::<_, Option<i64>>(7)?,
+                        ))
+                    })
+                    .map_err(db_err)?;
+                let mut out = Vec::new();
+                for r in rows {
+                    let (id_s, agent, device, perm, created, expires, last_used, revoked) =
+                        r.map_err(db_err)?;
+                    out.push(TokenRecord {
+                        id: TokenId::parse(&id_s)?,
+                        agent,
+                        device,
+                        permission: permission_from_str(&perm)?,
+                        created_at: ts_to_utc(created).unwrap_or_default(),
+                        expires_at: expires.and_then(ts_to_utc),
+                        last_used: last_used.and_then(ts_to_utc),
+                        revoked_at: revoked.and_then(ts_to_utc),
+                    });
+                }
+                Ok(out)
+            })
+            .await
+    }
+
+    /// Authenticate a bearer token string, verifying identity, lifecycle, and secret.
+    ///
+    /// Returns `Unauthorized` for any invalid, expired, revoked, or tampered token.
+    pub async fn authenticate(&self, bearer: &str) -> StashResult<AuthOutcome> {
+        let parsed = token::Token::parse(bearer)?;
+        let id_s = parsed.id.as_str().to_string();
+
+        // Step 1: fetch the stored row (no secret comparison yet).
+        let row = self
+            .db
+            .run(move |conn| {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT hash, agent, device, permission, expires_at, revoked_at
+                         FROM tokens WHERE id = ?1",
+                    )
+                    .map_err(db_err)?;
+                let mut rows = stmt.query(rusqlite::params![id_s]).map_err(db_err)?;
+                let row = rows.next().map_err(db_err)?;
+                row.map(|r| -> StashResult<_> {
+                    Ok((
+                        r.get::<_, Vec<u8>>(0).map_err(db_err)?,
+                        r.get::<_, String>(1).map_err(db_err)?,
+                        r.get::<_, String>(2).map_err(db_err)?,
+                        r.get::<_, String>(3).map_err(db_err)?,
+                        r.get::<_, Option<i64>>(4).map_err(db_err)?,
+                        r.get::<_, Option<i64>>(5).map_err(db_err)?,
+                    ))
+                })
+                .transpose()
+            })
+            .await?;
+
+        let Some((phc, agent, device, perm, expires_at, revoked_at)) = row else {
+            return Err(StashError::Unauthorized);
+        };
+
+        // Step 2: enforce lifecycle (revoked / expired).
+        if revoked_at.is_some() {
+            return Err(StashError::Unauthorized);
+        }
+        if let Some(exp) = expires_at {
+            if exp <= Utc::now().timestamp() {
+                return Err(StashError::Unauthorized);
+            }
+        }
+
+        // Step 3: verify argon2id hash.
+        let phc_s = std::str::from_utf8(&phc).map_err(|_| StashError::Internal {
+            trace_id: "bad-phc-utf8".into(),
+        })?;
+        if !token::verify_secret(&parsed.secret, phc_s)? {
+            return Err(StashError::Unauthorized);
+        }
+
+        // Step 4: bump last_used (fire-and-forget; failure does not deny auth).
+        let bump_id = parsed.id.as_str().to_string();
+        let _ = self
+            .db
+            .run(move |conn| {
+                conn.execute(
+                    "UPDATE tokens SET last_used = ?1 WHERE id = ?2",
+                    rusqlite::params![Utc::now().timestamp(), bump_id],
+                )
+                .map_err(db_err)
+            })
+            .await;
+
+        let identity = Identity::new(agent, device)?;
+        let permission = permission_from_str(&perm)?;
+        Ok(AuthOutcome {
+            token_id: parsed.id,
+            identity,
+            permission,
+        })
+    }
+}
+
+/// Filter for `AuthService::list`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListFilter {
+    Live,
+    All,
+}
+
+/// Result of a successful bearer authentication.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthOutcome {
+    pub token_id: TokenId,
+    pub identity: Identity,
+    pub permission: Permission,
 }
 
 fn permission_to_str(p: Permission) -> &'static str {
@@ -121,7 +266,6 @@ fn permission_to_str(p: Permission) -> &'static str {
     }
 }
 
-#[allow(dead_code)]
 fn permission_from_str(s: &str) -> StashResult<Permission> {
     match s {
         "full" => Ok(Permission::Full),
@@ -133,7 +277,6 @@ fn permission_from_str(s: &str) -> StashResult<Permission> {
     }
 }
 
-#[allow(dead_code)]
 fn ts_to_utc(ts: i64) -> Option<DateTime<Utc>> {
     Utc.timestamp_opt(ts, 0).single()
 }
@@ -148,14 +291,22 @@ mod tests {
     async fn fixture() -> (tempfile::TempDir, AuthService) {
         let td = tempfile::tempdir().unwrap();
         let db = Db::open(td.path().join("meta.db")).await.unwrap();
-        let cfg = AuthConfig { argon2_m_cost_kib: 8, argon2_t_cost: 1, argon2_p_cost: 1, ..AuthConfig::default() };
+        let cfg = AuthConfig {
+            argon2_m_cost_kib: 8,
+            argon2_t_cost: 1,
+            argon2_p_cost: 1,
+            ..AuthConfig::default()
+        };
         (td, AuthService::new(db, cfg))
     }
 
     #[tokio::test]
     async fn mint_returns_plaintext_bearer_once() {
         let (_td, auth) = fixture().await;
-        let (rec, tok) = auth.mint("claude", "tootie", Permission::Full, None).await.unwrap();
+        let (rec, tok) = auth
+            .mint("claude", "tootie", Permission::Full, None)
+            .await
+            .unwrap();
         assert_eq!(rec.agent, "claude");
         assert_eq!(rec.device, "tootie");
         assert_eq!(rec.permission, Permission::Full);
@@ -166,23 +317,202 @@ mod tests {
     #[tokio::test]
     async fn mint_rejects_duplicate_live_identity() {
         let (_td, auth) = fixture().await;
-        auth.mint("claude", "tootie", Permission::Full, None).await.unwrap();
-        let err = auth.mint("claude", "tootie", Permission::Full, None).await.unwrap_err();
+        auth.mint("claude", "tootie", Permission::Full, None)
+            .await
+            .unwrap();
+        let err = auth
+            .mint("claude", "tootie", Permission::Full, None)
+            .await
+            .unwrap_err();
         assert!(matches!(err, stash_types::StashError::Conflict { .. }));
     }
 
     #[tokio::test]
     async fn mint_after_revoke_succeeds() {
         let (_td, auth) = fixture().await;
-        let (rec, _) = auth.mint("claude", "tootie", Permission::Full, None).await.unwrap();
+        let (rec, _) = auth
+            .mint("claude", "tootie", Permission::Full, None)
+            .await
+            .unwrap();
         auth.revoke(&rec.id).await.unwrap();
-        auth.mint("claude", "tootie", Permission::Full, None).await.unwrap();
+        auth.mint("claude", "tootie", Permission::Full, None)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
     async fn mint_normalizes_identity_components() {
         let (_td, auth) = fixture().await;
-        let err = auth.mint("Claude!", "tootie", Permission::Full, None).await.unwrap_err();
+        let err = auth
+            .mint("Claude!", "tootie", Permission::Full, None)
+            .await
+            .unwrap_err();
         assert!(matches!(err, stash_types::StashError::InvalidInput { .. }));
+    }
+
+    #[tokio::test]
+    async fn list_returns_minted_records_without_secrets() {
+        let (_td, auth) = fixture().await;
+        auth.mint("claude", "tootie", Permission::Full, None)
+            .await
+            .unwrap();
+        auth.mint("codex", "dookie", Permission::Full, None)
+            .await
+            .unwrap();
+        let recs = auth.list(ListFilter::All).await.unwrap();
+        assert_eq!(recs.len(), 2);
+        let agents: std::collections::BTreeSet<_> = recs.iter().map(|r| r.agent.clone()).collect();
+        assert!(agents.contains("claude"));
+        assert!(agents.contains("codex"));
+    }
+
+    #[tokio::test]
+    async fn list_live_excludes_revoked() {
+        let (_td, auth) = fixture().await;
+        let (a, _) = auth.mint("a", "x", Permission::Full, None).await.unwrap();
+        let (_b, _) = auth.mint("b", "x", Permission::Full, None).await.unwrap();
+        auth.revoke(&a.id).await.unwrap();
+        let recs = auth.list(ListFilter::Live).await.unwrap();
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].agent, "b");
+    }
+
+    #[tokio::test]
+    async fn list_sorted_newest_first() {
+        let (_td, auth) = fixture().await;
+        auth.mint("a", "x", Permission::Full, None).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        auth.mint("b", "x", Permission::Full, None).await.unwrap();
+        let recs = auth.list(ListFilter::All).await.unwrap();
+        assert_eq!(recs[0].agent, "b");
+        assert_eq!(recs[1].agent, "a");
+    }
+
+    #[tokio::test]
+    async fn revoke_unknown_id_is_not_found() {
+        let (_td, auth) = fixture().await;
+        let fake = TokenId::parse("tk_0000000000000000").unwrap();
+        let err = auth.revoke(&fake).await.unwrap_err();
+        assert!(matches!(err, stash_types::StashError::NotFound { .. }));
+    }
+
+    #[tokio::test]
+    async fn revoke_already_revoked_is_not_found() {
+        let (_td, auth) = fixture().await;
+        let (rec, _) = auth
+            .mint("claude", "tootie", Permission::Full, None)
+            .await
+            .unwrap();
+        auth.revoke(&rec.id).await.unwrap();
+        let err = auth.revoke(&rec.id).await.unwrap_err();
+        assert!(
+            matches!(err, stash_types::StashError::NotFound { .. }),
+            "second revoke should be NotFound — the `revoked_at IS NULL` filter eliminates the row"
+        );
+    }
+
+    #[tokio::test]
+    async fn authenticate_valid_token_returns_identity_and_permission() {
+        let (_td, auth) = fixture().await;
+        let (_rec, tok) = auth
+            .mint("claude", "tootie", Permission::Full, None)
+            .await
+            .unwrap();
+        let out = auth.authenticate(tok.expose()).await.unwrap();
+        assert_eq!(out.identity.agent, "claude");
+        assert_eq!(out.identity.device, "tootie");
+        assert_eq!(out.permission, Permission::Full);
+        assert_eq!(out.token_id, tok.id);
+    }
+
+    #[tokio::test]
+    async fn authenticate_unknown_token_is_unauthorized() {
+        let (_td, auth) = fixture().await;
+        let err = auth
+            .authenticate("sk_live_tk_0000000000000000_notasecret")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, stash_types::StashError::Unauthorized));
+    }
+
+    #[tokio::test]
+    async fn authenticate_malformed_bearer_is_unauthorized() {
+        let (_td, auth) = fixture().await;
+        let err = auth.authenticate("not-a-token").await.unwrap_err();
+        assert!(matches!(err, stash_types::StashError::Unauthorized));
+    }
+
+    #[tokio::test]
+    async fn authenticate_wrong_secret_is_unauthorized() {
+        let (_td, auth) = fixture().await;
+        let (_rec, tok) = auth
+            .mint("claude", "tootie", Permission::Full, None)
+            .await
+            .unwrap();
+        let bearer = tok.expose();
+        // Flip the last character — still ASCII, still the right length,
+        // but the argon2id verification must fail.
+        let mut bytes = bearer.as_bytes().to_vec();
+        let last = bytes.last_mut().unwrap();
+        *last = if *last == b'a' { b'b' } else { b'a' };
+        let tampered = String::from_utf8(bytes).unwrap();
+        let err = auth.authenticate(&tampered).await.unwrap_err();
+        assert!(matches!(err, stash_types::StashError::Unauthorized));
+    }
+
+    #[tokio::test]
+    async fn authenticate_revoked_token_is_unauthorized() {
+        let (_td, auth) = fixture().await;
+        let (rec, tok) = auth
+            .mint("claude", "tootie", Permission::Full, None)
+            .await
+            .unwrap();
+        auth.revoke(&rec.id).await.unwrap();
+        let err = auth.authenticate(tok.expose()).await.unwrap_err();
+        assert!(matches!(err, stash_types::StashError::Unauthorized));
+    }
+
+    #[tokio::test]
+    async fn authenticate_expired_token_is_unauthorized() {
+        let (_td, auth) = fixture().await;
+        let past = chrono::Utc::now() - chrono::Duration::seconds(1);
+        let (_rec, tok) = auth
+            .mint("admin", "bootstrap", Permission::MintOnly, Some(past))
+            .await
+            .unwrap();
+        let err = auth.authenticate(tok.expose()).await.unwrap_err();
+        assert!(matches!(err, stash_types::StashError::Unauthorized));
+    }
+
+    #[tokio::test]
+    async fn authenticate_updates_last_used() {
+        let (_td, auth) = fixture().await;
+        let (rec, tok) = auth
+            .mint("claude", "tootie", Permission::Full, None)
+            .await
+            .unwrap();
+        assert!(rec.last_used.is_none());
+        auth.authenticate(tok.expose()).await.unwrap();
+        let after = auth.list(ListFilter::All).await.unwrap();
+        assert!(after[0].last_used.is_some());
+    }
+
+    #[tokio::test]
+    async fn authenticate_is_concurrent_safe() {
+        let (_td, auth) = fixture().await;
+        let (_rec, tok) = auth
+            .mint("claude", "tootie", Permission::Full, None)
+            .await
+            .unwrap();
+        let bearer = tok.expose().to_string();
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let auth = auth.clone();
+            let b = bearer.clone();
+            handles.push(tokio::spawn(async move { auth.authenticate(&b).await }));
+        }
+        for h in handles {
+            h.await.unwrap().unwrap();
+        }
     }
 }
