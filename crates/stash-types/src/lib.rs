@@ -9,6 +9,7 @@ pub mod path;
 pub mod search;
 pub mod sha;
 pub mod tier;
+pub mod token;
 
 pub use diff::DiffText;
 pub use error::{StashError, StashResult};
@@ -19,3 +20,4 @@ pub use path::{InvalidPathReason, StashPath};
 pub use search::SearchHit;
 pub use sha::{InvalidSha, Sha};
 pub use tier::StorageTier;
+pub use token::{InvalidTokenId, Permission, TokenId, TokenRecord};
