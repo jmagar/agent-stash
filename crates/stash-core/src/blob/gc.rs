@@ -46,18 +46,25 @@ pub async fn sweep_gc(db: &Db, blobs_dir: &Path, grace_days: u64) -> StashResult
                     continue;
                 }
             };
-            // Only remove the DB row if the file was actually deleted.
-            // If remove_file fails (e.g. permission error, already gone on a
-            // different replica), leave the row so a future sweep can retry.
-            if std::fs::remove_file(&path).is_ok() {
-                stats.blobs_deleted += 1;
-                stats.bytes_freed += size_bytes.max(0) as u64;
-                conn.execute(
-                    "DELETE FROM blob_refs WHERE sha = ?1",
-                    rusqlite::params![sha],
-                )
-                .map_err(db_err)?;
+            // Remove the file. NotFound means a prior sweep or crash already
+            // cleaned it up — treat that as success so the DB row is also
+            // removed. Other I/O errors are propagated to abort this sweep.
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    tracing::warn!("blob GC: file already absent for sha {sha:?}, removing DB row");
+                }
+                Err(e) => return Err(stash_types::StashError::Internal {
+                    trace_id: format!("gc-remove:{e}"),
+                }),
             }
+            stats.blobs_deleted += 1;
+            stats.bytes_freed += size_bytes.max(0) as u64;
+            conn.execute(
+                "DELETE FROM blob_refs WHERE sha = ?1",
+                rusqlite::params![sha],
+            )
+            .map_err(db_err)?;
         }
         Ok(stats)
     })

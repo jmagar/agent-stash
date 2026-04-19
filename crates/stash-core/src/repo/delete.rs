@@ -13,13 +13,21 @@ impl StashRepo {
         // Read current git blob to detect blob-tier stub before tombstoning.
         let (_, raw) = self.read_raw_git(path).await?;
 
-        // Best-effort: if the stub is malformed, skip the refcount release rather
-        // than blocking the delete. The blob will be over-counted until GC detects
-        // that no valid stub references it (future repair utility).
+        // Best-effort: if the stub is malformed, log a warning so the
+        // inconsistency is visible in logs, then continue without releasing
+        // the refcount. The blob will be over-counted until a future repair
+        // utility reconciles it; this is preferable to blocking the delete.
         let blob_sha: Option<String> = if crate::blob::stub::is_blob_stub(&raw) {
             match crate::blob::stub::parse_stub(&raw) {
                 Ok(stub) => Some(stub.sha256),
-                Err(_) => None,
+                Err(e) => {
+                    tracing::warn!(
+                        path = %path,
+                        error = ?e,
+                        "delete: malformed blob stub — skipping refcount release"
+                    );
+                    None
+                }
             }
         } else {
             None

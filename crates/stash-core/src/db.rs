@@ -7,8 +7,9 @@ use std::{
 };
 
 pub(crate) fn db_err(e: rusqlite::Error) -> StashError {
+    tracing::error!(error = %e, "database query failed");
     StashError::Internal {
-        trace_id: format!("db:{e}"),
+        trace_id: "db-query-failed".into(),
     }
 }
 
@@ -28,8 +29,11 @@ impl Db {
             })
         })
         .await
-        .map_err(|e| StashError::Internal {
-            trace_id: format!("join:{e}"),
+        .map_err(|e| {
+            tracing::error!(error = %e, "db open task join failed");
+            StashError::Internal {
+                trace_id: "db-join-failed".into(),
+            }
         })?
     }
 
@@ -56,8 +60,11 @@ impl Db {
             )
         })
         .await
-        .map_err(|e| StashError::Internal {
-            trace_id: format!("join:{e}"),
+        .map_err(|e| {
+            tracing::error!(error = %e, "db run task join failed");
+            StashError::Internal {
+                trace_id: "db-join-failed".into(),
+            }
         })?
     }
 }

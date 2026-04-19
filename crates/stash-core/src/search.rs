@@ -41,8 +41,11 @@ impl StashRepo {
                     break;
                 }
                 let blob = repo.find_blob(git2::Oid::from_str(e.blob_sha.as_str()).unwrap())?;
-                // Skip blob-tier stubs — they are internal metadata, not user content.
-                if crate::blob::stub::is_blob_stub(blob.content()) {
+                // Skip fully-validated blob-tier stubs — they are internal
+                // metadata, not user content. Use `parse_stub` (full validation)
+                // rather than `is_blob_stub` (prefix-only) to avoid skipping
+                // legitimate user content that merely starts with the magic bytes.
+                if crate::blob::stub::parse_stub(blob.content()).is_ok() {
                     continue;
                 }
                 let content = match std::str::from_utf8(blob.content()) {

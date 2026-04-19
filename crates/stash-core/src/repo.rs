@@ -30,6 +30,9 @@ pub struct StashRepo {
     pub(crate) router: TierRouter,
     #[allow(dead_code)]
     pub(crate) db: Db,
+    /// Handle for the background GC task. Aborted automatically when
+    /// `StashRepo` is dropped, preventing unbounded task accumulation.
+    _gc_handle: tokio::task::JoinHandle<()>,
 }
 
 impl StashRepo {
@@ -48,8 +51,8 @@ impl StashRepo {
         .await?;
         let db = Db::open(root.join("meta.db")).await?;
         let blob_store = BlobStore::new(&root, db.clone());
-        let router = TierRouter::new(config.blob.clone());
-        spawn_gc_task(
+        let router = TierRouter::new(config.blob.clone())?;
+        let _gc_handle = spawn_gc_task(
             db.clone(),
             root.join("blobs"),
             config.blob.gc_interval_secs,
@@ -62,9 +65,18 @@ impl StashRepo {
             blob_store,
             router,
             db,
+            _gc_handle,
         })
     }
 
+    /// Open an existing `StashRepo` at `root`.
+    ///
+    /// This opens and migrates the metadata DB. It may fail if:
+    /// - The git repository at `root/repo.git` does not exist or is corrupt.
+    /// - The SQLite database at `root/meta.db` cannot be opened or migrated.
+    ///
+    /// Callers should surface the error to the operator; the store is unusable
+    /// until the underlying issue (missing files, locked DB, etc.) is resolved.
     pub async fn open(root: impl AsRef<Path>, config: StashConfig) -> StashResult<Self> {
         let root = root.as_ref().to_path_buf();
         let repo_path = root.join("repo.git");
@@ -72,8 +84,8 @@ impl StashRepo {
         git::blocking(move || git2::Repository::open_bare(&rp).map(|_| ())).await?;
         let db = Db::open(root.join("meta.db")).await?;
         let blob_store = BlobStore::new(&root, db.clone());
-        let router = TierRouter::new(config.blob.clone());
-        spawn_gc_task(
+        let router = TierRouter::new(config.blob.clone())?;
+        let _gc_handle = spawn_gc_task(
             db.clone(),
             root.join("blobs"),
             config.blob.gc_interval_secs,
@@ -86,11 +98,20 @@ impl StashRepo {
             blob_store,
             router,
             db,
+            _gc_handle,
         })
     }
 
     pub fn repo_path(&self) -> &Path {
         &self.repo_path
+    }
+}
+
+impl Drop for StashRepo {
+    fn drop(&mut self) {
+        // Abort the background GC task so it doesn't outlive the repo.
+        // Without this, each init/open call would leak an untracked task.
+        self._gc_handle.abort();
     }
 }
 

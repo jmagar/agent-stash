@@ -19,24 +19,36 @@ impl StashRepo {
             path: path_for_err.clone(),
         })?;
 
-        // Transparent blob hydration
+        // Transparent blob hydration.
+        // `is_blob_stub` is a prefix-only check; `parse_stub` does full
+        // validation. If parsing fails the content merely starts with the
+        // magic bytes (false positive) — fall through and return raw bytes as
+        // a normal git object. Only hard-fail if the stub is fully valid but
+        // blob hydration itself fails.
         if crate::blob::stub::is_blob_stub(&out.bytes) {
-            let stub = crate::blob::stub::parse_stub(&out.bytes)?;
-            let blob_bytes = self.blob_store.fetch(&stub.sha256).await?;
-            let ident = Identity::parse(&out.author_name)
-                .unwrap_or_else(|_| Identity::new("unknown", "unknown").unwrap());
-            let version = FileVersion {
-                path: path_for_err,
-                sha: out.blob_sha,
-                commit: out.commit_sha,
-                size: stub.size,
-                mime: stub.mime,
-                author: ident,
-                timestamp: out.timestamp,
-                message: out.message,
-                tier: StorageTier::Blob,
-            };
-            return Ok((version, blob_bytes));
+            match crate::blob::stub::parse_stub(&out.bytes) {
+                Ok(stub) => {
+                    let blob_bytes = self.blob_store.fetch(&stub.sha256).await?;
+                    let ident = Identity::parse(&out.author_name)
+                        .unwrap_or_else(|_| Identity::new("unknown", "unknown").unwrap());
+                    let version = FileVersion {
+                        path: path_for_err,
+                        sha: out.blob_sha,
+                        commit: out.commit_sha,
+                        size: stub.size,
+                        mime: stub.mime,
+                        author: ident,
+                        timestamp: out.timestamp,
+                        message: out.message,
+                        tier: StorageTier::Blob,
+                    };
+                    return Ok((version, blob_bytes));
+                }
+                Err(_) => {
+                    // False positive: content starts with magic header but is
+                    // not a valid stub. Fall through to return the raw bytes.
+                }
+            }
         }
 
         let ident = Identity::parse(&out.author_name)

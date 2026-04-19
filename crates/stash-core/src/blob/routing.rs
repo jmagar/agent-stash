@@ -1,24 +1,59 @@
 use crate::config::BlobConfig;
-use stash_types::StorageTier;
+use stash_types::{StashError, StashResult, StorageTier};
 
 #[derive(Debug)]
 pub struct TierRouter {
     config: BlobConfig,
+    /// Pre-compiled patterns for `force_git_globs` — evaluated first, override
+    /// all other rules and always route to git.
+    force_git_patterns: Vec<glob::Pattern>,
+    /// Pre-compiled patterns for `blob_path_globs` — evaluated after
+    /// `force_git_patterns` and route to the blob tier on match.
+    blob_path_patterns: Vec<glob::Pattern>,
 }
 
 impl TierRouter {
-    pub fn new(config: BlobConfig) -> Self {
-        Self { config }
+    /// Build a `TierRouter` from the given config, compiling all glob patterns
+    /// eagerly. Returns an error if any pattern string is invalid so that
+    /// misconfiguration is caught at startup rather than silently ignored.
+    pub fn new(config: BlobConfig) -> StashResult<Self> {
+        let force_git_patterns = config
+            .force_git_globs
+            .iter()
+            .map(|p| {
+                glob::Pattern::new(p).map_err(|e| StashError::InvalidInput {
+                    field: "force_git_globs".into(),
+                    reason: format!("invalid glob pattern {p:?}: {e}"),
+                })
+            })
+            .collect::<StashResult<Vec<_>>>()?;
+
+        let blob_path_patterns = config
+            .blob_path_globs
+            .iter()
+            .map(|p| {
+                glob::Pattern::new(p).map_err(|e| StashError::InvalidInput {
+                    field: "blob_path_globs".into(),
+                    reason: format!("invalid glob pattern {p:?}: {e}"),
+                })
+            })
+            .collect::<StashResult<Vec<_>>>()?;
+
+        Ok(Self {
+            config,
+            force_git_patterns,
+            blob_path_patterns,
+        })
     }
 
     pub fn decide(&self, path: &str, size: u64, mime: &str) -> StorageTier {
-        for pat in &self.config.force_git_globs {
-            if glob::Pattern::new(pat).is_ok_and(|p| p.matches(path)) {
+        for pat in &self.force_git_patterns {
+            if pat.matches(path) {
                 return StorageTier::Git;
             }
         }
-        for pat in &self.config.blob_path_globs {
-            if glob::Pattern::new(pat).is_ok_and(|p| p.matches(path)) {
+        for pat in &self.blob_path_patterns {
+            if pat.matches(path) {
                 return StorageTier::Blob;
             }
         }
@@ -41,7 +76,7 @@ mod tests {
     use stash_types::StorageTier;
 
     fn router() -> TierRouter {
-        TierRouter::new(BlobConfig::default())
+        TierRouter::new(BlobConfig::default()).unwrap()
     }
 
     #[test]
@@ -88,7 +123,7 @@ mod tests {
     fn force_git_glob_overrides_mime() {
         let mut cfg = BlobConfig::default();
         cfg.force_git_globs = vec!["*.png".into()];
-        let r = TierRouter::new(cfg);
+        let r = TierRouter::new(cfg).unwrap();
         assert_eq!(r.decide("icon.png", 100, "image/png"), StorageTier::Git);
     }
 
@@ -97,10 +132,24 @@ mod tests {
     fn force_git_glob_overrides_size() {
         let mut cfg = BlobConfig::default();
         cfg.force_git_globs = vec!["*.bin".into()];
-        let r = TierRouter::new(cfg);
+        let r = TierRouter::new(cfg).unwrap();
         assert_eq!(
             r.decide("data.bin", 5 * 1024 * 1024, "application/octet-stream"),
             StorageTier::Git
         );
+    }
+
+    #[test]
+    fn invalid_force_git_glob_returns_error() {
+        let mut cfg = BlobConfig::default();
+        cfg.force_git_globs = vec!["[invalid".into()];
+        assert!(TierRouter::new(cfg).is_err());
+    }
+
+    #[test]
+    fn invalid_blob_path_glob_returns_error() {
+        let mut cfg = BlobConfig::default();
+        cfg.blob_path_globs = vec!["[invalid".into()];
+        assert!(TierRouter::new(cfg).is_err());
     }
 }
