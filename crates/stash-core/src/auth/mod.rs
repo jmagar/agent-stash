@@ -1,3 +1,4 @@
+pub(crate) mod bootstrap;
 pub(crate) mod token;
 
 use crate::config::AuthConfig;
@@ -164,6 +165,11 @@ impl AuthService {
                 Ok(out)
             })
             .await
+    }
+
+    #[doc(hidden)]
+    pub(crate) fn db_for_bootstrap(&self) -> Db {
+        self.db.clone()
     }
 
     /// Authenticate a bearer token string, verifying identity, lifecycle, and secret.
