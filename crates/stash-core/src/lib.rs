@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+pub mod audit;
 pub mod auth;
 pub(crate) mod blob;
 pub mod config;
