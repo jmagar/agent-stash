@@ -45,7 +45,7 @@ impl StashRepo {
             mime: mime.clone(),
             original_name: path.as_str().to_string(),
             uploaded_by: ident.to_string(),
-        }));
+        })?);
 
         match self.write_git(path, stub_bytes, ident, msg).await {
             Ok(mut git_ver) => {

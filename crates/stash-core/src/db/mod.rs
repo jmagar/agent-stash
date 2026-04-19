@@ -43,7 +43,17 @@ impl Db {
             let guard = conn.lock().map_err(|_| StashError::Internal {
                 trace_id: "db-lock-poisoned".into(),
             })?;
-            f(&guard)
+            // Wrap the closure invocation in catch_unwind so that a panic
+            // inside `f` does not propagate past the MutexGuard drop point.
+            // Without this, the panic would poison the shared Mutex, making
+            // all subsequent `run` calls fail with a PoisonError.
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&guard))).unwrap_or_else(
+                |_| {
+                    Err(StashError::Internal {
+                        trace_id: "db-panic".into(),
+                    })
+                },
+            )
         })
         .await
         .map_err(|e| StashError::Internal {

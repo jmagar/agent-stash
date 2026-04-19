@@ -37,7 +37,15 @@ pub async fn sweep_gc(db: &Db, blobs_dir: &Path, grace_days: u64) -> StashResult
             bytes_freed: 0,
         };
         for (sha, size_bytes) in candidates {
-            let path = blob_path(&blobs_dir, &sha);
+            // If the sha is malformed (e.g. DB corruption), skip this entry
+            // rather than propagating an error that would abort the whole sweep.
+            let path = match blob_path(&blobs_dir, &sha) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!("blob GC: skipping malformed sha {sha:?}: {e:?}");
+                    continue;
+                }
+            };
             // Only remove the DB row if the file was actually deleted.
             // If remove_file fails (e.g. permission error, already gone on a
             // different replica), leave the row so a future sweep can retry.
@@ -64,7 +72,15 @@ pub fn spawn_gc_task(
     grace_days: u64,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let interval = tokio::time::Duration::from_secs(interval_secs);
+        // Enforce a minimum interval of 1 second to prevent a tight busy-loop
+        // when gc_interval_secs is 0. Log a warning so operators can diagnose.
+        let clamped = interval_secs.max(1);
+        if clamped != interval_secs {
+            tracing::warn!(
+                "gc_interval_secs={interval_secs} is below the minimum (1); clamping to {clamped}"
+            );
+        }
+        let interval = tokio::time::Duration::from_secs(clamped);
         loop {
             tokio::time::sleep(interval).await;
             if let Err(e) = sweep_gc(&db, &blobs_dir, grace_days).await {
@@ -98,7 +114,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(stats.blobs_deleted, 0);
-        assert!(blob_path(td.path().join("blobs").as_path(), &r.sha256).exists());
+        assert!(blob_path(td.path().join("blobs").as_path(), &r.sha256).unwrap().exists());
     }
 
     #[tokio::test]
@@ -157,6 +173,6 @@ mod tests {
             .unwrap();
         assert_eq!(stats.blobs_deleted, 1);
         assert_eq!(stats.bytes_freed, 12);
-        assert!(!blob_path(td.path().join("blobs").as_path(), &r.sha256).exists());
+        assert!(!blob_path(td.path().join("blobs").as_path(), &r.sha256).unwrap().exists());
     }
 }

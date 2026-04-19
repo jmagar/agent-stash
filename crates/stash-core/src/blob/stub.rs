@@ -18,25 +18,28 @@ pub fn is_blob_stub(data: &[u8]) -> bool {
     data.starts_with(HEADER_BYTES)
 }
 
-/// Emit a stub. Panics in debug, returns empty bytes in release if any field
-/// contains a newline — callers must pass clean values from trusted paths.
-pub fn write_stub(stub: &BlobStub) -> Vec<u8> {
+/// Emit a stub. Returns `Err(StashError::InvalidInput)` if any field contains
+/// a newline or carriage-return character, which would corrupt the line-oriented
+/// stub format in both debug and release builds.
+pub fn write_stub(stub: &BlobStub) -> StashResult<Vec<u8>> {
     for (name, val) in [
         ("sha256", &stub.sha256),
         ("mime", &stub.mime),
         ("original_name", &stub.original_name),
         ("uploaded_by", &stub.uploaded_by),
     ] {
-        debug_assert!(
-            !val.contains('\n') && !val.contains('\r'),
-            "stub field `{name}` contains line break — refusing to write malformed stub"
-        );
+        if val.contains('\n') || val.contains('\r') {
+            return Err(StashError::InvalidInput {
+                field: name.to_string(),
+                reason: "field must not contain line-break characters".to_string(),
+            });
+        }
     }
-    format!(
+    Ok(format!(
         "# stash:blob/v1\nsha256: {}\nsize: {}\nmime: {}\noriginal_name: {}\nuploaded_by: {}\n",
         stub.sha256, stub.size, stub.mime, stub.original_name, stub.uploaded_by
     )
-    .into_bytes()
+    .into_bytes())
 }
 
 pub fn parse_stub(data: &[u8]) -> StashResult<BlobStub> {
@@ -119,7 +122,7 @@ mod tests {
 
     #[test]
     fn write_starts_with_header() {
-        let bytes = write_stub(&sample());
+        let bytes = write_stub(&sample()).unwrap();
         assert!(bytes.starts_with(b"# stash:blob/v1\n"));
     }
 
@@ -133,7 +136,7 @@ mod tests {
     #[test]
     fn round_trips_all_fields() {
         let original = sample();
-        let bytes = write_stub(&original);
+        let bytes = write_stub(&original).unwrap();
         let parsed = parse_stub(&bytes).unwrap();
         assert_eq!(parsed.sha256, original.sha256);
         assert_eq!(parsed.size, original.size);
@@ -172,5 +175,16 @@ mod tests {
         assert!(is_blob_stub(b"# stash:blob/v1\nextra"));
         assert!(!is_blob_stub(b"# stash:blob/v2\n"));
         assert!(!is_blob_stub(b""));
+    }
+
+    #[test]
+    fn write_stub_rejects_newline_in_field() {
+        let mut bad = sample();
+        bad.mime = "text/plain\ninjected: evil".into();
+        assert!(write_stub(&bad).is_err());
+
+        let mut bad2 = sample();
+        bad2.original_name = "file\r\nX-Header: injected".into();
+        assert!(write_stub(&bad2).is_err());
     }
 }

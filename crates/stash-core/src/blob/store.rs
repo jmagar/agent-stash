@@ -49,10 +49,27 @@ impl BlobStore {
         self.db
             .run(move |conn| {
                 let sha = hex::encode(Sha256::digest(&data[..]));
-                let path = blob_path(&blobs_dir, &sha);
                 let size = data.len() as u64;
                 let now = chrono::Utc::now().to_rfc3339();
 
+                // Make the DB the authoritative source of truth using an UPSERT.
+                // This avoids the INSERT-vs-UPDATE race that arose from using the
+                // filesystem existence check to decide which branch to take.
+                conn.execute(
+                    "INSERT INTO blob_refs(sha,refcount,size_bytes,mime,created_at,last_ref_at)
+                     VALUES(?1,1,?2,?3,?4,?4)
+                     ON CONFLICT(sha) DO UPDATE
+                       SET refcount    = refcount + 1,
+                           last_ref_at = excluded.last_ref_at",
+                    rusqlite::params![sha, size as i64, mime, now],
+                )
+                .map_err(db_err)?;
+
+                // Write the blob file only after the DB row is committed so that
+                // a crash between write and DB insert can never leave an orphaned
+                // blob. The file write is idempotent: if the content-addressed
+                // file already exists the rename is a no-op on the same inode.
+                let path = blob_path(&blobs_dir, &sha)?;
                 if !path.exists() {
                     if let Some(parent) = path.parent() {
                         std::fs::create_dir_all(parent).map_err(io_err)?;
@@ -62,30 +79,6 @@ impl BlobStore {
                     let tmp = path.with_extension("tmp");
                     std::fs::write(&tmp, &data[..]).map_err(io_err)?;
                     std::fs::rename(&tmp, &path).map_err(io_err)?;
-                    conn.execute(
-                        "INSERT INTO blob_refs(sha,refcount,size_bytes,mime,created_at,last_ref_at)
-                         VALUES(?1,1,?2,?3,?4,?4)",
-                        rusqlite::params![sha, size as i64, mime, now],
-                    )
-                    .map_err(db_err)?;
-                } else {
-                    // Blob file already exists — increment the refcount row.
-                    // If the DB row is missing (e.g. DB was wiped), insert it fresh.
-                    let updated = conn
-                        .execute(
-                            "UPDATE blob_refs SET refcount = refcount + 1, last_ref_at = ?1
-                             WHERE sha = ?2",
-                            rusqlite::params![now, sha],
-                        )
-                        .map_err(db_err)?;
-                    if updated == 0 {
-                        conn.execute(
-                            "INSERT INTO blob_refs(sha,refcount,size_bytes,mime,created_at,last_ref_at)
-                             VALUES(?1,1,?2,?3,?4,?4)",
-                            rusqlite::params![sha, size as i64, mime, now],
-                        )
-                        .map_err(db_err)?;
-                    }
                 }
 
                 Ok(BlobRef {
@@ -99,7 +92,7 @@ impl BlobStore {
 
     pub async fn fetch(&self, sha256: &str) -> StashResult<Bytes> {
         validate_sha256(sha256)?;
-        let path = blob_path(&self.blobs_dir, sha256);
+        let path = blob_path(&self.blobs_dir, sha256)?;
         tokio::task::spawn_blocking(move || std::fs::read(&path).map(Bytes::from).map_err(io_err))
             .await
             .map_err(|e| StashError::Internal {
@@ -126,9 +119,16 @@ impl BlobStore {
     }
 }
 
-pub(crate) fn blob_path(blobs_dir: &Path, sha256: &str) -> PathBuf {
-    // Caller must have validated sha256 is exactly 64 lowercase hex chars.
-    blobs_dir.join(&sha256[..2]).join(&sha256[2..])
+pub(crate) fn blob_path(blobs_dir: &Path, sha256: &str) -> StashResult<PathBuf> {
+    // Guard against short or malformed sha256 strings that would cause a
+    // panic on the slice operations below.
+    if sha256.len() < 3 {
+        return Err(StashError::InvalidInput {
+            field: "sha256".to_string(),
+            reason: format!("sha256 too short to form a path (got {} chars)", sha256.len()),
+        });
+    }
+    Ok(blobs_dir.join(&sha256[..2]).join(&sha256[2..]))
 }
 
 fn io_err(e: std::io::Error) -> StashError {
@@ -168,7 +168,7 @@ mod tests {
         let r1 = store.store(&data, "text/plain").await.unwrap();
         let r2 = store.store(&data, "text/plain").await.unwrap();
         assert_eq!(r1.sha256, r2.sha256);
-        let path = blob_path(td.path().join("blobs").as_path(), &r1.sha256);
+        let path = blob_path(td.path().join("blobs").as_path(), &r1.sha256).unwrap();
         assert!(path.exists());
     }
 
