@@ -150,28 +150,38 @@ mod tests {
                 "INSERT INTO tokens (id, hash, agent, device, permission, created_at)
                  VALUES ('tk_aaaaaaaaaaaaaaaa', x'00', 'claude', 'tootie', 'full', 1000)",
                 [],
-            ).map_err(db_err)?;
+            )
+            .map_err(db_err)?;
             let second = c.execute(
                 "INSERT INTO tokens (id, hash, agent, device, permission, created_at)
                  VALUES ('tk_bbbbbbbbbbbbbbbb', x'00', 'claude', 'tootie', 'full', 2000)",
                 [],
             );
-            assert!(second.is_err(), "partial unique index should reject second live row");
+            assert!(
+                second.is_err(),
+                "partial unique index should reject second live row"
+            );
             Ok(())
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
 
         // Revoke the first; a new live row must be allowed.
         db.run(|c| {
             c.execute(
                 "UPDATE tokens SET revoked_at = 1500 WHERE id = 'tk_aaaaaaaaaaaaaaaa'",
                 [],
-            ).map_err(db_err)?;
+            )
+            .map_err(db_err)?;
             c.execute(
                 "INSERT INTO tokens (id, hash, agent, device, permission, created_at)
                  VALUES ('tk_cccccccccccccccc', x'00', 'claude', 'tootie', 'full', 2500)",
                 [],
-            ).map_err(db_err)?;
+            )
+            .map_err(db_err)?;
             Ok(())
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
     }
 }

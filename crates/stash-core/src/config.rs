@@ -20,9 +20,9 @@ impl Default for StashConfig {
     fn default() -> Self {
         Self {
             max_body: default_max_body(),
-            blob:     BlobConfig::default(),
-            auth:     AuthConfig::default(),
-            audit:    AuditConfig::default(),
+            blob: BlobConfig::default(),
+            auth: AuthConfig::default(),
+            audit: AuditConfig::default(),
         }
     }
 }
@@ -107,20 +107,30 @@ pub struct AuthConfig {
     pub argon2_p_cost: u32,
 }
 
-fn default_admin_token_ttl_secs() -> u64 { 3_600 }
-fn default_write_per_minute() -> u32 { 120 }
-fn default_argon2_m_cost_kib() -> u32 { 19 * 1024 }
-fn default_argon2_t_cost() -> u32 { 2 }
-fn default_argon2_p_cost() -> u32 { 1 }
+fn default_admin_token_ttl_secs() -> u64 {
+    3_600
+}
+fn default_write_per_minute() -> u32 {
+    120
+}
+fn default_argon2_m_cost_kib() -> u32 {
+    19 * 1024
+}
+fn default_argon2_t_cost() -> u32 {
+    2
+}
+fn default_argon2_p_cost() -> u32 {
+    1
+}
 
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
             admin_token_ttl_secs: default_admin_token_ttl_secs(),
-            write_per_minute:     default_write_per_minute(),
-            argon2_m_cost_kib:    default_argon2_m_cost_kib(),
-            argon2_t_cost:        default_argon2_t_cost(),
-            argon2_p_cost:        default_argon2_p_cost(),
+            write_per_minute: default_write_per_minute(),
+            argon2_m_cost_kib: default_argon2_m_cost_kib(),
+            argon2_t_cost: default_argon2_t_cost(),
+            argon2_p_cost: default_argon2_p_cost(),
         }
     }
 }
@@ -133,7 +143,9 @@ pub struct AuditConfig {
     pub read_sample_rate: f64,
 }
 
-fn default_read_sample_rate() -> f64 { 0.01 }
+fn default_read_sample_rate() -> f64 {
+    0.01
+}
 
 fn de_rate<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     use serde::de::Error;
@@ -146,7 +158,9 @@ fn de_rate<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
 
 impl Default for AuditConfig {
     fn default() -> Self {
-        Self { read_sample_rate: default_read_sample_rate() }
+        Self {
+            read_sample_rate: default_read_sample_rate(),
+        }
     }
 }
 
