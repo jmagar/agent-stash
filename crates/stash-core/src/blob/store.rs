@@ -1,12 +1,26 @@
 use crate::db::{db_err, Db};
 use bytes::Bytes;
 use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
 use stash_types::{StashError, StashResult};
+use std::path::{Path, PathBuf};
+
+fn validate_sha256(sha: &str) -> StashResult<()> {
+    if sha.len() != 64
+        || !sha
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Err(StashError::Internal {
+            trace_id: format!("invalid-sha256:{sha}"),
+        });
+    }
+    Ok(())
+}
 
 pub struct BlobRef {
     pub sha256: String,
     pub size: u64,
+    #[allow(dead_code)]
     pub mime: String,
 }
 
@@ -71,23 +85,27 @@ impl BlobStore {
                     .map_err(db_err)?;
                 }
 
-                Ok(BlobRef { sha256: sha, size, mime })
+                Ok(BlobRef {
+                    sha256: sha,
+                    size,
+                    mime,
+                })
             })
             .await
     }
 
     pub async fn fetch(&self, sha256: &str) -> StashResult<Bytes> {
+        validate_sha256(sha256)?;
         let path = blob_path(&self.blobs_dir, sha256);
-        tokio::task::spawn_blocking(move || {
-            std::fs::read(&path).map(Bytes::from).map_err(io_err)
-        })
-        .await
-        .map_err(|e| StashError::Internal {
-            trace_id: format!("join:{e}"),
-        })?
+        tokio::task::spawn_blocking(move || std::fs::read(&path).map(Bytes::from).map_err(io_err))
+            .await
+            .map_err(|e| StashError::Internal {
+                trace_id: format!("join:{e}"),
+            })?
     }
 
     pub async fn release(&self, sha256: &str) -> StashResult<()> {
+        validate_sha256(sha256)?;
         let sha = sha256.to_string();
         let now = chrono::Utc::now().to_rfc3339();
         self.db
@@ -106,6 +124,7 @@ impl BlobStore {
 }
 
 pub(crate) fn blob_path(blobs_dir: &Path, sha256: &str) -> PathBuf {
+    // Caller must have validated sha256 is exactly 64 lowercase hex chars.
     blobs_dir.join(&sha256[..2]).join(&sha256[2..])
 }
 
@@ -122,7 +141,9 @@ mod tests {
 
     async fn make_store() -> (BlobStore, tempfile::TempDir) {
         let td = tempfile::tempdir().unwrap();
-        let db = crate::db::Db::open(td.path().join("meta.db")).await.unwrap();
+        let db = crate::db::Db::open(td.path().join("meta.db"))
+            .await
+            .unwrap();
         let store = BlobStore::new(td.path(), db);
         (store, td)
     }
