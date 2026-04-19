@@ -1,4 +1,5 @@
 pub(crate) mod bootstrap;
+pub mod rate;
 pub(crate) mod token;
 
 use crate::config::AuthConfig;
