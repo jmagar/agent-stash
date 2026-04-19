@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agent Stash</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Crect x='8' y='10' width='16' height='3' rx='1.5' fill='%23fff' opacity='.95'/%3E%3Crect x='8' y='14.5' width='16' height='3' rx='1.5' fill='%23fff' opacity='.65'/%3E%3Crect x='8' y='19' width='16' height='3' rx='1.5' fill='%23fff' opacity='.35'/%3E%3C/svg%3E" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0b0d12; color: #e6e8ef; overflow: hidden; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2a313e; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a4250; }
+  ::selection { background: rgba(99,102,241,0.3); }
+  input::placeholder { color: #6b7280; }
+  select { outline: none; cursor: pointer; }
+  button { font-family: "DM Sans", -apple-system, sans-serif; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="stash-theme.jsx"></script>
+<script type="text/babel" src="stash-artifact-page.jsx"></script>
+<script type="text/babel" src="stash-mcp-registry.jsx"></script>
+<script type="text/babel" src="stash-marketplace-pages.jsx"></script>
+<script type="text/babel" src="stash-bazaar.jsx"></script>
+<script type="text/babel" src="stash-browser.jsx"></script>
+<script type="text/babel" src="stash-detail.jsx"></script>
+<script type="text/babel" src="stash-cli.jsx"></script>
+<script type="text/babel" src="stash-cmdk.jsx"></script>
+<script type="text/babel" src="stash-local.jsx"></script>
+<script type="text/babel" src="stash-app.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "accentColor": "#3b82f6"
+}/*EDITMODE-END*/;
+
+function TweaksPanel({ visible, tweaks, onChange }) {
+  if (!visible) return null;
+  const accents = [
+    { id: '#6366f1', label: 'Indigo' },
+    { id: '#3b82f6', label: 'Blue' },
+    { id: '#14b8a6', label: 'Teal' },
+    { id: '#a855f7', label: 'Violet' },
+    { id: '#22c55e', label: 'Emerald' },
+    { id: '#f59e0b', label: 'Amber' },
+    { id: '#ec4899', label: 'Pink' },
+  ];
+  return (
+    <div style={{
+      position: 'fixed', bottom: 20, right: 20, width: 240, zIndex: 9999,
+      background: '#161a21', border: '1px solid #2a313e', borderRadius: 10,
+      boxShadow: '0 12px 40px rgba(0,0,0,0.6)', fontFamily: T.font, overflow: 'hidden',
+    }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid #1f2530', fontSize: 13, fontWeight: 600, color: '#e6e8ef' }}>
+        Tweaks
+      </div>
+      <div style={{ padding: '14px 16px' }}>
+        <div style={{ fontSize: 12, color: '#aab1be', marginBottom: 8, fontWeight: 500 }}>Accent color</div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {accents.map(a => (
+            <button key={a.id} onClick={() => onChange({ ...tweaks, accentColor: a.id })}
+              title={a.label}
+              style={{
+                width: 28, height: 28, borderRadius: 14, padding: 0,
+                border: tweaks.accentColor === a.id ? `2px solid ${a.id}` : '2px solid #2a313e',
+                background: a.id, cursor: 'pointer',
+                boxShadow: tweaks.accentColor === a.id ? `0 0 0 2px #161a21, 0 0 0 4px ${a.id}66` : 'none',
+                transition: 'all 0.15s',
+              }} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Root() {
+  const [tweaks, setTweaks] = React.useState(TWEAK_DEFAULTS);
+  const [tweaksVisible, setTweaksVisible] = React.useState(false);
+
+  React.useEffect(() => {
+    T.accent = tweaks.accentColor;
+    T.accentHover = tweaks.accentColor + 'dd';
+    T.accentMuted = tweaks.accentColor + '1f';
+    T.accentSoft = tweaks.accentColor + '33';
+    // Lighten accent text for contrast on dark bg
+    T.accentText = tweaks.accentColor + 'cc';
+  }, [tweaks]);
+
+  React.useEffect(() => {
+    const handler = (e) => {
+      if (e.data?.type === '__activate_edit_mode') setTweaksVisible(true);
+      if (e.data?.type === '__deactivate_edit_mode') setTweaksVisible(false);
+    };
+    window.addEventListener('message', handler);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
+  const handleTweakChange = (newTweaks) => {
+    setTweaks(newTweaks);
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: newTweaks }, '*');
+  };
+
+  return (
+    <>
+      <AppShell key={tweaks.accentColor} />
+      <TweaksPanel visible={tweaksVisible} tweaks={tweaks} onChange={handleTweakChange} />
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <LocalDataProvider><Root /></LocalDataProvider>
+);
+</script>
+
+</body>
+</html>
