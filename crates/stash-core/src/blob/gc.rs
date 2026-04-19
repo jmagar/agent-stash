@@ -29,8 +29,8 @@ pub async fn sweep_gc(db: &Db, blobs_dir: &Path, grace_days: u64) -> StashResult
                 Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
             })
             .map_err(db_err)?
-            .filter_map(|r| r.ok())
-            .collect();
+            .map(|r| r.map_err(db_err))
+            .collect::<StashResult<_>>()?;
 
         let mut stats = GcStats {
             blobs_deleted: 0,
@@ -38,15 +38,18 @@ pub async fn sweep_gc(db: &Db, blobs_dir: &Path, grace_days: u64) -> StashResult
         };
         for (sha, size_bytes) in candidates {
             let path = blob_path(&blobs_dir, &sha);
+            // Only remove the DB row if the file was actually deleted.
+            // If remove_file fails (e.g. permission error, already gone on a
+            // different replica), leave the row so a future sweep can retry.
             if std::fs::remove_file(&path).is_ok() {
                 stats.blobs_deleted += 1;
                 stats.bytes_freed += size_bytes.max(0) as u64;
+                conn.execute(
+                    "DELETE FROM blob_refs WHERE sha = ?1",
+                    rusqlite::params![sha],
+                )
+                .map_err(db_err)?;
             }
-            conn.execute(
-                "DELETE FROM blob_refs WHERE sha = ?1",
-                rusqlite::params![sha],
-            )
-            .map_err(db_err)?;
         }
         Ok(stats)
     })
