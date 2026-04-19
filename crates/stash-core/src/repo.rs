@@ -1,3 +1,19 @@
+//! `StashRepo` — unified entry point for the agent-stash storage layer.
+//!
+//! This module intentionally wires together two subsystems:
+//!
+//! 1. **Content-addressable blob tier** (`BlobStore` + `TierRouter`): large
+//!    binary payloads are stored outside the git object graph and referenced
+//!    via lightweight stub files committed into the repository.
+//!
+//! 2. **Auth service** (consumed by callers via `StashRepo`): token minting,
+//!    validation, and the bootstrap admin-token flow are co-located here
+//!    because every write path that touches the repo must also be authorized.
+//!
+//! The combined scope — blob store **and** auth — is deliberate.  Future
+//! readers should not be surprised to find both concerns in the same crate;
+//! they share the same SQLite database (`meta.db`) and lifecycle.
+
 use crate::{
     blob::{spawn_gc_task, BlobStore, TierRouter},
     config::StashConfig,

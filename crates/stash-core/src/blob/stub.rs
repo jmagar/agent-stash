@@ -19,8 +19,9 @@ pub fn is_blob_stub(data: &[u8]) -> bool {
 }
 
 /// Emit a stub. Returns `Err(StashError::InvalidInput)` if any field contains
-/// a newline or carriage-return character, which would corrupt the line-oriented
-/// stub format in both debug and release builds.
+/// an ASCII control character (including newlines), which would corrupt the
+/// line-oriented stub format. This validation is enforced in all build modes;
+/// there is no silent truncation or empty-bytes fallback.
 pub fn write_stub(stub: &BlobStub) -> StashResult<Vec<u8>> {
     for (name, val) in [
         ("sha256", &stub.sha256),

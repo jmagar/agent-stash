@@ -8,7 +8,6 @@ use stash_types::{Permission, StashError, StashResult};
 use std::path::Path;
 
 /// Outcome of `ensure_admin_token`.
-#[derive(Debug)]
 pub enum Bootstrap {
     Minted {
         bearer: String,
@@ -16,6 +15,26 @@ pub enum Bootstrap {
         expires_at: chrono::DateTime<Utc>,
     },
     AlreadyPresent,
+}
+
+/// Manual `Debug` implementation that redacts the bearer token in the `Minted`
+/// variant so it cannot be exposed via logging or error messages.
+impl std::fmt::Debug for Bootstrap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Bootstrap::Minted {
+                token_id,
+                expires_at,
+                ..
+            } => f
+                .debug_struct("Bootstrap::Minted")
+                .field("bearer", &"[REDACTED]")
+                .field("token_id", token_id)
+                .field("expires_at", expires_at)
+                .finish(),
+            Bootstrap::AlreadyPresent => write!(f, "Bootstrap::AlreadyPresent"),
+        }
+    }
 }
 
 /// On first run, mint an admin token with `permission = MintOnly` valid for
