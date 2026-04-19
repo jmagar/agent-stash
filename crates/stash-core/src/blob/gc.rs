@@ -90,7 +90,7 @@ mod tests {
         let store = make_store(&td).await;
         let data = Bytes::from("keep me");
         let r = store
-            .store(&data, "text/plain", "f.txt", "a@b")
+            .store(&data, "text/plain")
             .await
             .unwrap();
         store.release(&r.sha256).await.unwrap();
@@ -107,7 +107,7 @@ mod tests {
         let store = make_store(&td).await;
         let data = Bytes::from("still referenced");
         let r = store
-            .store(&data, "text/plain", "f.txt", "a@b")
+            .store(&data, "text/plain")
             .await
             .unwrap();
         let old = "2000-01-01T00:00:00+00:00";
@@ -138,7 +138,7 @@ mod tests {
         let store = make_store(&td).await;
         let data = Bytes::from("expired blob");
         let r = store
-            .store(&data, "text/plain", "f.txt", "a@b")
+            .store(&data, "text/plain")
             .await
             .unwrap();
         store.release(&r.sha256).await.unwrap();

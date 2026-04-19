@@ -45,18 +45,10 @@ impl BlobStore {
         }
     }
 
-    pub async fn store(
-        &self,
-        data: &Bytes,
-        mime: &str,
-        original_name: &str,
-        uploaded_by: &str,
-    ) -> StashResult<BlobRef> {
+    pub async fn store(&self, data: &Bytes, mime: &str) -> StashResult<BlobRef> {
         let blobs_dir = self.blobs_dir.clone();
         let data = data.clone();
         let mime = mime.to_string();
-        let _original_name = original_name.to_string();
-        let _uploaded_by = uploaded_by.to_string();
 
         self.db
             .run(move |conn| {
@@ -69,7 +61,11 @@ impl BlobStore {
                     if let Some(parent) = path.parent() {
                         std::fs::create_dir_all(parent).map_err(io_err)?;
                     }
-                    std::fs::write(&path, &data[..]).map_err(io_err)?;
+                    // Atomic write: write to a sibling temp file then rename so
+                    // a crash mid-write never leaves a partial blob on disk.
+                    let tmp = path.with_extension("tmp");
+                    std::fs::write(&tmp, &data[..]).map_err(io_err)?;
+                    std::fs::rename(&tmp, &path).map_err(io_err)?;
                     conn.execute(
                         "INSERT INTO blob_refs(sha,refcount,size_bytes,mime,created_at,last_ref_at)
                          VALUES(?1,1,?2,?3,?4,?4)",
@@ -77,12 +73,23 @@ impl BlobStore {
                     )
                     .map_err(db_err)?;
                 } else {
-                    conn.execute(
-                        "UPDATE blob_refs SET refcount = refcount + 1, last_ref_at = ?1
-                         WHERE sha = ?2",
-                        rusqlite::params![now, sha],
-                    )
-                    .map_err(db_err)?;
+                    // Blob file already exists — increment the refcount row.
+                    // If the DB row is missing (e.g. DB was wiped), insert it fresh.
+                    let updated = conn
+                        .execute(
+                            "UPDATE blob_refs SET refcount = refcount + 1, last_ref_at = ?1
+                             WHERE sha = ?2",
+                            rusqlite::params![now, sha],
+                        )
+                        .map_err(db_err)?;
+                    if updated == 0 {
+                        conn.execute(
+                            "INSERT INTO blob_refs(sha,refcount,size_bytes,mime,created_at,last_ref_at)
+                             VALUES(?1,1,?2,?3,?4,?4)",
+                            rusqlite::params![sha, size as i64, mime, now],
+                        )
+                        .map_err(db_err)?;
+                    }
                 }
 
                 Ok(BlobRef {
@@ -153,7 +160,7 @@ mod tests {
         let (store, _td) = make_store().await;
         let data = Bytes::from("hello blob");
         let r = store
-            .store(&data, "text/plain", "notes.txt", "claude@tootie")
+            .store(&data, "text/plain")
             .await
             .unwrap();
         assert_eq!(r.size, 10);
@@ -166,11 +173,11 @@ mod tests {
         let (store, td) = make_store().await;
         let data = Bytes::from("duplicate content");
         let r1 = store
-            .store(&data, "text/plain", "a.txt", "claude@tootie")
+            .store(&data, "text/plain")
             .await
             .unwrap();
         let r2 = store
-            .store(&data, "text/plain", "b.txt", "claude@tootie")
+            .store(&data, "text/plain")
             .await
             .unwrap();
         assert_eq!(r1.sha256, r2.sha256);
@@ -183,7 +190,7 @@ mod tests {
         let (store, _td) = make_store().await;
         let data = Bytes::from("fetch me");
         let r = store
-            .store(&data, "text/plain", "file.txt", "claude@tootie")
+            .store(&data, "text/plain")
             .await
             .unwrap();
         let fetched = store.fetch(&r.sha256).await.unwrap();
@@ -195,7 +202,7 @@ mod tests {
         let (store, _td) = make_store().await;
         let data = Bytes::from("release me");
         let r = store
-            .store(&data, "text/plain", "file.txt", "claude@tootie")
+            .store(&data, "text/plain")
             .await
             .unwrap();
         store.release(&r.sha256).await.unwrap();
@@ -222,11 +229,11 @@ mod tests {
         let (store, _td) = make_store().await;
         let data = Bytes::from("shared content");
         let r = store
-            .store(&data, "text/plain", "a.txt", "claude@tootie")
+            .store(&data, "text/plain")
             .await
             .unwrap();
         store
-            .store(&data, "text/plain", "b.txt", "claude@tootie")
+            .store(&data, "text/plain")
             .await
             .unwrap();
         let count: i64 = store

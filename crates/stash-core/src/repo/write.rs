@@ -21,7 +21,8 @@ impl StashRepo {
         let tier = self.router.decide(path.as_str(), size, &mime);
 
         if tier == StorageTier::Blob {
-            self.write_blob_tier(path, bytes, ident, msg, mime, size).await
+            self.write_blob_tier(path, bytes, ident, msg, mime, size)
+                .await
         } else {
             self.write_git(path, bytes, ident, msg).await
         }
@@ -38,7 +39,7 @@ impl StashRepo {
     ) -> StashResult<FileVersion> {
         let blob_ref: BlobRef = self
             .blob_store
-            .store(&bytes, &mime, path.as_str(), &ident.to_string())
+            .store(&bytes, &mime)
             .await?;
 
         let stub_bytes = Bytes::from(write_stub(&BlobStub {
@@ -106,8 +107,8 @@ impl StashRepo {
     ) -> StashResult<(stash_types::Sha, Bytes)> {
         let repo_path = self.repo_path.clone();
         let path_c = path.clone();
-        let out = git_helpers::blocking(move || git_helpers::read_at(&repo_path, &path_c, None))
-            .await?;
+        let out =
+            git_helpers::blocking(move || git_helpers::read_at(&repo_path, &path_c, None)).await?;
         let out = out.ok_or(stash_types::StashError::NotFound { path: path.clone() })?;
         Ok((out.blob_sha, Bytes::from(out.bytes)))
     }
@@ -115,8 +116,8 @@ impl StashRepo {
 
 #[cfg(test)]
 mod tests {
-    use crate::StashRepo;
     use crate::config::StashConfig;
+    use crate::StashRepo;
     use bytes::Bytes;
     use stash_types::{Identity, StashPath, StorageTier};
 
@@ -127,7 +128,9 @@ mod tests {
     #[tokio::test]
     async fn write_creates_commit_and_returns_version() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         let p = StashPath::parse("docs/plan.md").unwrap();
         let v = r
             .write(&p, Bytes::from("hello"), &id(), Some("first".into()))
@@ -144,7 +147,9 @@ mod tests {
     #[tokio::test]
     async fn write_twice_produces_different_commits() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         let p = StashPath::parse("a.md").unwrap();
         let v1 = r.write(&p, Bytes::from("one"), &id(), None).await.unwrap();
         let v2 = r.write(&p, Bytes::from("two"), &id(), None).await.unwrap();
@@ -155,7 +160,9 @@ mod tests {
     #[tokio::test]
     async fn write_default_message_is_generated() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         let p = StashPath::parse("docs/x.md").unwrap();
         let v = r.write(&p, Bytes::from("hi"), &id(), None).await.unwrap();
         assert_eq!(v.message.as_deref(), Some("stash: write docs/x.md"));
@@ -165,7 +172,11 @@ mod tests {
     async fn write_serializes_under_mutex() {
         use std::sync::Arc;
         let td = tempfile::tempdir().unwrap();
-        let r = Arc::new(StashRepo::init(td.path(), StashConfig::default()).await.unwrap());
+        let r = Arc::new(
+            StashRepo::init(td.path(), StashConfig::default())
+                .await
+                .unwrap(),
+        );
         let mut handles = vec![];
         for i in 0..10 {
             let r = Arc::clone(&r);
@@ -183,7 +194,9 @@ mod tests {
     #[tokio::test]
     async fn write_small_text_stays_in_git_tier() {
         let td = tempfile::tempdir().unwrap();
-        let r = StashRepo::init(td.path(), StashConfig::default()).await.unwrap();
+        let r = StashRepo::init(td.path(), StashConfig::default())
+            .await
+            .unwrap();
         let p = StashPath::parse("docs/plan.md").unwrap();
         let v = r
             .write(&p, Bytes::from("hello"), &id(), None)
