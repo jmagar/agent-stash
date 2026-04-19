@@ -125,6 +125,7 @@ impl AuthService {
                         "SELECT id, agent, device, permission, created_at, \
                          expires_at, last_used, revoked_at \
                          FROM tokens WHERE revoked_at IS NULL \
+                         AND (expires_at IS NULL OR expires_at > CAST(strftime('%s','now') AS INTEGER)) \
                          ORDER BY created_at DESC"
                     }
                     ListFilter::All => {
@@ -228,7 +229,7 @@ impl AuthService {
             return Err(StashError::Unauthorized);
         }
 
-        // Step 4: bump last_used (fire-and-forget; failure does not deny auth).
+        // Step 4: bump last_used (awaited; failure does not deny auth).
         let bump_id = parsed.id.as_str().to_string();
         let _ = self
             .db
@@ -241,10 +242,11 @@ impl AuthService {
             })
             .await;
 
+        let token_id = parsed.id.clone();
         let identity = Identity::new(agent, device)?;
         let permission = permission_from_str(&perm)?;
         Ok(AuthOutcome {
-            token_id: parsed.id,
+            token_id,
             identity,
             permission,
         })

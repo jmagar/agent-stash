@@ -38,6 +38,10 @@ pub fn run(conn: &Connection) -> StashResult<()> {
             ON tokens(agent, device) WHERE revoked_at IS NULL;
         CREATE INDEX IF NOT EXISTS idx_tokens_created_at
             ON tokens(created_at);
+        -- Partial index covering only live (non-revoked, non-expired) tokens.
+        CREATE INDEX IF NOT EXISTS idx_tokens_live
+            ON tokens(id) WHERE revoked_at IS NULL
+            AND (expires_at IS NULL OR expires_at > CAST(strftime('%s','now') AS INTEGER));
 
         -- v2 (P03): audit log
         CREATE TABLE IF NOT EXISTS audit (

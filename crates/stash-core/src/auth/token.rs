@@ -17,6 +17,12 @@ pub struct Token {
     bearer: String,
 }
 
+impl Drop for Token {
+    fn drop(&mut self) {
+        self.bearer.zeroize();
+    }
+}
+
 impl std::fmt::Debug for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Token")
